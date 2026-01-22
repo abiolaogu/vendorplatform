@@ -317,8 +317,8 @@ Proprietary - BillyRonks Global Limited. All rights reserved.
 
 - **Company**: BillyRonks Global Limited
 - **CEO**: Abiola Ogunsakin
-- **Email**: [contact@billyronks.com](mailto:contact@billyronks.com)
-- **Website**: [https://billyronks.com](https://billyronks.com)
+- **Email**: [contact@billyronks.com](mailto:abiolaog@billyronks.net)
+- **Website**: [https://billyronks.com](https://billyronks.net)
 
 ---
 
