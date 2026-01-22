@@ -1,0 +1,268 @@
+version: '3.8'
+
+# =============================================================================
+# VENDORPLATFORM - LOCAL DEVELOPMENT ENVIRONMENT
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # APPLICATION SERVICES
+  # ===========================================================================
+  
+  api:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile
+    container_name: vendorplatform-api
+    ports:
+      - "8080:8080"
+    environment:
+      - ENV=development
+      - PORT=8080
+      - DATABASE_URL=postgres://vendorplatform:vendorplatform@postgres:5432/vendorplatform
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=dev-secret-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.worker
+    container_name: vendorplatform-worker
+    environment:
+      - ENV=development
+      - DATABASE_URL=postgres://vendorplatform:vendorplatform@postgres:5432/vendorplatform
+      - REDIS_URL=redis://redis:6379
+      - NUM_WORKERS=3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  ml-service:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.ml
+    container_name: vendorplatform-ml
+    ports:
+      - "8081:8081"
+    environment:
+      - ENV=development
+      - DATABASE_URL=postgres://vendorplatform:vendorplatform@postgres:5432/vendorplatform
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # DATA STORES
+  # ===========================================================================
+  
+  postgres:
+    image: timescale/timescaledb-ha:pg15-latest
+    container_name: vendorplatform-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=vendorplatform
+      - POSTGRES_PASSWORD=vendorplatform
+      - POSTGRES_DB=vendorplatform
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vendorplatform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: vendorplatform-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: vendorplatform-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # MONITORING
+  # ===========================================================================
+  
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: vendorplatform-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: vendorplatform-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # MESSAGE QUEUE (Optional - for high-volume scenarios)
+  # ===========================================================================
+  
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: vendorplatform-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=vendorplatform
+      - RABBITMQ_DEFAULT_PASS=vendorplatform
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - vendorplatform-network
+    restart: unless-stopped
+    profiles:
+      - full
+
+  # ===========================================================================
+  # DEVELOPMENT TOOLS
+  # ===========================================================================
+  
+  adminer:
+    image: adminer:latest
+    container_name: vendorplatform-adminer
+    ports:
+      - "8088:8080"
+    depends_on:
+      - postgres
+    networks:
+      - vendorplatform-network
+    profiles:
+      - dev
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: vendorplatform-redis-commander
+    ports:
+      - "8089:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - vendorplatform-network
+    profiles:
+      - dev
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: vendorplatform-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - vendorplatform-network
+    profiles:
+      - dev
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+
+networks:
+  vendorplatform-network:
+    driver: bridge
+    name: vendorplatform-network
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+
+volumes:
+  postgres-data:
+    name: vendorplatform-postgres-data
+  redis-data:
+    name: vendorplatform-redis-data
+  elasticsearch-data:
+    name: vendorplatform-elasticsearch-data
+  prometheus-data:
+    name: vendorplatform-prometheus-data
+  grafana-data:
+    name: vendorplatform-grafana-data
+  rabbitmq-data:
+    name: vendorplatform-rabbitmq-data

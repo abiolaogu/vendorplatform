@@ -1,325 +1,296 @@
-# VendorPlatform - Contextual Commerce Orchestration
+# VendorPlatform
 
-[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
-[![Python Version](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python)](https://python.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?style=flat&logo=postgresql)](https://postgresql.org)
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+> **Contextual Commerce Orchestration Platform** - When life happens, we handle it.
 
-> **"When someone needs one service, they typically need 5-15 related services."**
+[![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org/)
+[![Python Version](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python)](https://python.org/)
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=flat&logo=flutter)](https://flutter.dev/)
+[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
 
-VendorPlatform is a multi-product platform that captures entire transaction value chains through contextual commerce orchestration. Instead of discrete vendor discovery, we predict adjacent needs, pre-qualify vendors, and reduce coordination friction.
+---
+
+## 🎯 Vision
+
+**VendorPlatform** is a comprehensive marketplace that recognizes a fundamental truth: when someone needs one service, they typically need 5-15 related services. We become the orchestration layer that predicts adjacent needs, pre-qualifies vendors, reduces coordination friction, and captures the entire transaction value chain across **15 service clusters**.
+
+---
 
 ## 🏗️ Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     SHARED DATA LAYER                           │
-├─────────────────────────────────────────────────────────────────┤
-│  Vendors  │  Services  │  Categories  │  Adjacencies  │  Users  │
-├─────────────────────────────────────────────────────────────────┤
-│                   RECOMMENDATION ENGINE                         │
-│  Adjacent Services │ Collaborative Filtering │ Event-Based     │
-├─────────────────────────────────────────────────────────────────┤
-│                    BOOKING & PAYMENT                            │
-│  Reservations │ Payments │ Escrow │ Invoicing │ Refunds        │
-└─────────────────────────────────────────────────────────────────┘
-          ↑              ↑              ↑              ↑
-    ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐  ┌─────┴─────┐
-    │  LifeOS   │  │ EventGPT  │  │ VendorNet │  │HomeRescue │
-    └───────────┘  └───────────┘  └───────────┘  └───────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              VENDORPLATFORM                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  FRONTEND CLIENTS                                                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │ Mobile App  │  │  Web Client │  │Admin Panel  │  │ Vendor App  │         │
+│  │  (Flutter)  │  │   (React)   │  │   (React)   │  │  (Flutter)  │         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+├─────────┴────────────────┴────────────────┴────────────────┴────────────────┤
+│  API GATEWAY (Gin/Go)                                                        │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │  Auth │ Rate Limiting │ Request Logging │ CORS │ Metrics │ Tracing  │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  PLATFORM PRODUCTS                                                           │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │   LifeOS    │  │  EventGPT   │  │ VendorNet   │  │ HomeRescue  │         │
+│  │  Life Event │  │   AI Chat   │  │  B2B Network│  │  Emergency  │         │
+│  │Orchestration│  │   Planner   │  │  Referrals  │  │  Response   │         │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
+├─────────┴────────────────┴────────────────┴────────────────┴────────────────┤
+│  CORE SERVICES                                                               │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐  │
+│  │   Auth    │  │  Payment  │  │Notification│  │  Search   │  │  Storage  │  │
+│  │   JWT     │  │ Paystack  │  │Push/Email │  │Elasticsearch│ │    S3    │  │
+│  │  RBAC     │  │Flutterwave│  │   SMS     │  │Full-text  │  │   CDN    │  │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┘  └───────────┘  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  RECOMMENDATION ENGINE                                                       │
+│  ┌────────────────────────────────────────────────────────────────────┐     │
+│  │  Adjacency Graph │ Collaborative Filtering │ Event Detection │ ML  │     │
+│  └────────────────────────────────────────────────────────────────────┘     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  DATA LAYER                                                                  │
+│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐                 │
+│  │PostgreSQL │  │   Redis   │  │Elasticsearch│ │ TimescaleDB│                │
+│  │ + PostGIS │  │Cache/Queue│  │   Search   │  │Time-series │                │
+│  └───────────┘  └───────────┘  └───────────┘  └───────────┘                 │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
 
 ## 📦 Platform Products
 
 ### 1. LifeOS - Intelligent Life Event Orchestration
-**"Your Life's Operating System"**
+**"When life happens, LifeOS handles it."**
 
-When life events happen (weddings, relocations, childbirth), LifeOS detects them from behavioral signals and orchestrates the entire service cascade.
+Detects and orchestrates major life events (weddings, relocations, childbirth, renovations) by:
+- Analyzing behavioral signals to detect life events
+- Creating comprehensive orchestration plans with 7 phases
+- Coordinating multiple vendors automatically
+- Managing budgets and timelines
 
-- 🔍 **Event Detection**: AI detects life events before explicit user action
-- 📋 **Predictive Planning**: Complete service plans with timelines & budgets
-- 🎯 **Full Orchestration**: Manages entire vendor coordination
-- 💰 **Smart Bundling**: Bundle opportunities for savings
+📁 `api/lifeos/platform.go` (~1,800 lines)
+
+---
 
 ### 2. EventGPT - Conversational AI Event Planner
-**"Plan your perfect event through conversation"**
+**"Plan your perfect event through conversation."**
 
-Natural language interface that understands intent, asks clarifying questions, generates plans, and coordinates everything through chat.
+Natural language interface for event planning with:
+- Intent classification (13 intents)
+- Entity extraction (date, budget, location, event type)
+- Dialog state management
+- Rich responses (cards, quick replies, actions)
 
-- 💬 **Natural Language**: No forms, just conversation
-- 🧠 **Contextual Memory**: Remembers preferences across planning
-- ⚡ **Real-Time Matching**: Instant vendor recommendations
-- 🎨 **Rich Responses**: Cards, comparisons, quick replies
+📁 `api/eventgpt/platform.go` (~1,600 lines)
+
+---
 
 ### 3. VendorNet - B2B Partnership Network
 **"Grow together. Earn together."**
 
-Professional network for vendors to discover partners, share referrals, and collaborate on projects.
+Connects vendors for mutual benefit through:
+- Partnership matching with multi-factor scoring
+- Referral tracking with full lifecycle management
+- Collaborative bidding on large projects
+- Revenue sharing and fee management
 
-- 🤝 **Partnership Matching**: AI-powered complementary business matching
-- 📊 **Referral Tracking**: Automatic tracking & fee calculation
-- 💸 **Revenue Sharing**: Built-in payment splitting
-- 🏆 **Collaborative Bidding**: Team up for large projects
+📁 `api/vendornet/platform.go` (~1,400 lines)
+
+---
 
 ### 4. HomeRescue - Emergency Home Services
 **"Help arrives in minutes, not hours."**
 
-Emergency response system connecting homeowners with verified professionals for immediate response.
+Uber-like emergency dispatch for home crises with SLA guarantees:
 
-- ⚡ **Real-Time Availability**: See who's available NOW
-- 🎯 **Guaranteed Response**: SLA with refund if missed
-- 📍 **Live Tracking**: Know exactly when help arrives
-- 📄 **Instant Documentation**: Photos, receipts for insurance
+| Urgency | Response Time | Refund if Missed |
+|---------|--------------|-----------------|
+| Critical | < 30 min | 100% |
+| Urgent | < 2 hours | 50% |
+| Same-Day | < 6 hours | 25% discount |
 
-## 🗂️ Project Structure
-
-```
-vendorplatform/
-├── api/
-│   ├── lifeos/           # Life event orchestration platform
-│   │   └── platform.go   # Core LifeOS implementation (~1,800 lines)
-│   ├── eventgpt/         # Conversational AI planner
-│   │   └── platform.go   # EventGPT implementation (~1,600 lines)
-│   ├── vendornet/        # B2B partnership network
-│   │   └── platform.go   # VendorNet implementation (~1,400 lines)
-│   ├── homerescue/       # Emergency services platform
-│   │   └── platform.go   # HomeRescue implementation (~1,500 lines)
-│   ├── server.go         # Main API server
-│   └── handlers.go       # Shared API handlers
-├── recommendation-engine/
-│   ├── engine.go         # Core recommendation engine (Go)
-│   ├── ml_service.py     # ML models for predictions (Python)
-│   └── api/              # Recommendation API handlers
-├── database/
-│   ├── 001_core_schema.sql    # PostgreSQL schema with TimescaleDB, PostGIS
-│   └── 002_seed_data.sql      # Seed data for 15 service clusters
-├── docs/
-│   ├── PLATFORM_CONCEPTS_SUMMARY.md  # Executive summary
-│   ├── cluster_deep_dive_part1.md    # Service clusters 1-8
-│   ├── cluster_deep_dive_part2.md    # Service clusters 9-15
-│   └── Vendor_Platform_Strategy_Document.docx
-├── business-models/
-│   └── business_model_canvases.md    # Business model documentation
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Go 1.21+
-- PostgreSQL 15+ with extensions:
-  - TimescaleDB
-  - PostGIS
-  - pg_trgm
-  - ltree
-- Redis 7+
-- Python 3.11+ (for ML services)
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/BillyRonksGlobal/vendorplatform.git
-cd vendorplatform
-
-# Install Go dependencies
-go mod download
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Setup database
-createdb vendorplatform
-psql vendorplatform < database/001_core_schema.sql
-psql vendorplatform < database/002_seed_data.sql
-
-# Run the server
-make run
-```
-
-### Configuration
-
-Create a `.env` file:
-
-```env
-# Database
-DATABASE_URL=postgres://user:pass@localhost:5432/vendorplatform
-REDIS_URL=redis://localhost:6379
-
-# API
-PORT=8080
-ENV=development
-
-# Services
-NOTIFICATION_SERVICE_URL=http://localhost:8081
-PAYMENT_SERVICE_URL=http://localhost:8082
-```
-
-## 🛠️ Development
-
-### Running Tests
-
-```bash
-# Run all tests
-make test
-
-# Run with coverage
-make test-coverage
-
-# Run specific package tests
-go test ./api/lifeos/... -v
-```
-
-### Code Generation
-
-```bash
-# Generate mocks
-make generate
-
-# Generate API documentation
-make docs
-```
-
-### Linting
-
-```bash
-# Run linters
-make lint
-
-# Auto-fix issues
-make lint-fix
-```
-
-## 📊 Database Schema
-
-### Core Tables
-
-| Table | Description |
-|-------|-------------|
-| `users` | Platform users (customers, vendors, admins) |
-| `vendors` | Vendor profiles with verification status |
-| `service_categories` | Hierarchical category tree (LTREE) |
-| `services` | Individual services offered by vendors |
-| `service_adjacencies` | Service recommendation graph |
-| `life_event_triggers` | Detectable life events |
-| `bookings` | Service bookings and reservations |
-| `user_interactions` | User activity (TimescaleDB hypertable) |
-
-### Key Features
-
-- **LTREE** for hierarchical categories (e.g., `events.weddings.photography`)
-- **PostGIS** for geospatial queries (location-based search)
-- **TimescaleDB** for time-series interaction data
-- **JSONB** for flexible metadata storage
-
-## 🔌 API Reference
-
-### LifeOS Endpoints
-
-```
-POST   /api/v1/lifeos/events              # Create event
-GET    /api/v1/lifeos/events/:id          # Get event
-GET    /api/v1/lifeos/events/:id/plan     # Get orchestration plan
-POST   /api/v1/lifeos/events/:id/confirm  # Confirm detected event
-GET    /api/v1/lifeos/detected            # Get detected events
-```
-
-### EventGPT Endpoints
-
-```
-POST   /api/v1/eventgpt/conversations         # Start conversation
-POST   /api/v1/eventgpt/conversations/:id/messages  # Send message
-GET    /api/v1/eventgpt/conversations/:id     # Get conversation
-DELETE /api/v1/eventgpt/conversations/:id     # End conversation
-```
-
-### VendorNet Endpoints
-
-```
-GET    /api/v1/vendornet/partners/matches     # Get partner recommendations
-POST   /api/v1/vendornet/partnerships         # Create partnership
-POST   /api/v1/vendornet/referrals           # Create referral
-PUT    /api/v1/vendornet/referrals/:id/status # Update referral status
-GET    /api/v1/vendornet/analytics           # Get network analytics
-```
-
-### HomeRescue Endpoints
-
-```
-POST   /api/v1/homerescue/emergencies        # Create emergency request
-GET    /api/v1/homerescue/emergencies/:id    # Get emergency status
-GET    /api/v1/homerescue/emergencies/:id/tracking  # Real-time tracking
-POST   /api/v1/homerescue/technicians/location      # Update tech location
-PUT    /api/v1/homerescue/emergencies/:id/accept    # Tech accepts request
-```
-
-## 💰 Business Model
-
-### Revenue Streams
-
-| Stream | LifeOS | EventGPT | VendorNet | HomeRescue |
-|--------|--------|----------|-----------|------------|
-| Transaction Fees | 8-15% | 10-12% | 2.5% | 15-20% |
-| Subscriptions | ✅ | ✅ | ✅ | ✅ |
-| Premium Features | ✅ | ✅ | ✅ | - |
-| Insurance/Partners | - | - | - | ✅ |
-
-### Target Markets
-
-- **Primary**: Nigeria (Lagos, Abuja, Port Harcourt)
-- **Expansion**: West Africa, then Pan-African
-- **Long-term**: Global emerging markets
-
-## 🗺️ Roadmap
-
-### Phase 1: Foundation (Q1-Q2)
-- [x] Core database schema
-- [x] Recommendation engine
-- [x] Platform specifications
-- [ ] HomeRescue MVP launch
-- [ ] Basic vendor onboarding
-
-### Phase 2: Growth (Q3-Q4)
-- [ ] EventGPT conversational interface
-- [ ] VendorNet referral system
-- [ ] Mobile apps (iOS/Android)
-- [ ] Payment integration
-
-### Phase 3: Intelligence (Year 2)
-- [ ] LifeOS event detection
-- [ ] ML-powered recommendations
-- [ ] Advanced analytics
-- [ ] Partner API
-
-### Phase 4: Scale (Year 2+)
-- [ ] Geographic expansion
-- [ ] Enterprise features
-- [ ] White-label solutions
-- [ ] International markets
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-Proprietary - BillyRonks Global Limited. All rights reserved.
-
-## 📞 Contact
-
-- **Company**: BillyRonks Global Limited
-- **CEO**: Abiola Ogunsakin
-- **Email**: [contact@billyronks.com](mailto:abiolaog@billyronks.net)
-- **Website**: [https://billyronks.com](https://billyronks.net)
+📁 `api/homerescue/platform.go` (~1,500 lines)
 
 ---
 
-Built with ❤️ by BillyRonks Global Limited
+## 🛠️ Core Services
+
+| Service | Description | Location |
+|---------|-------------|----------|
+| **Auth** | JWT authentication, RBAC, sessions, verification | `internal/auth/` |
+| **Payment** | Paystack, Flutterwave, escrow, wallets, payouts | `internal/payment/` |
+| **Notification** | Push, Email, SMS, In-App with preferences | `internal/notification/` |
+| **Search** | Elasticsearch full-text, geo, facets, autocomplete | `internal/search/` |
+| **Storage** | S3-compatible file storage with CDN | `internal/storage/` |
+| **Worker** | Background jobs, cron, retries, monitoring | `internal/worker/` |
+
+---
+
+## 🧠 Recommendation Engine
+
+Production Go implementation with:
+- **Adjacency Graph**: Service relationships with affinity scores
+- **Collaborative Filtering**: User-based recommendations
+- **Event Detection**: Life event pattern matching
+- **Multi-factor Scoring**: Adjacency (35%), Collaborative (25%), Trending (15%), Personalization (20%), Location (5%)
+- **MMR Diversification**: Prevents homogeneous results
+
+📁 `recommendation-engine/engine.go` (~2,000 lines)
+
+---
+
+## 📊 Service Clusters (15 Categories)
+
+| # | Cluster | Example Services |
+|---|---------|-----------------|
+| 1 | **Celebrations** | Weddings, birthdays, corporate events |
+| 2 | **Home Services** | Cleaning, repairs, renovations |
+| 3 | **Travel** | Hotels, flights, car rentals |
+| 4 | **HORECA** | Catering, restaurants, hospitality |
+| 5 | **Fashion** | Tailoring, styling, accessories |
+| 6 | **Business** | Legal, accounting, consulting |
+| 7 | **Education** | Tutoring, training, certifications |
+| 8 | **Health** | Medical, wellness, fitness |
+| 9 | **Automotive** | Repairs, rentals, sales |
+| 10 | **Creative** | Photography, video, design |
+| 11 | **Agriculture** | Farming, equipment, processing |
+| 12 | **Pets** | Veterinary, grooming, supplies |
+| 13 | **Construction** | Building, architecture, engineering |
+| 14 | **Energy** | Solar, generators, electrical |
+| 15 | **Security** | Guards, CCTV, cyber security |
+
+---
+
+## 🚀 Quick Start
+
+### Using Docker Compose (Recommended)
+
+```bash
+# Clone repository
+git clone https://github.com/BillyRonksGlobal/vendorplatform.git
+cd vendorplatform
+
+# Start all services
+docker-compose up -d
+
+# With development tools (Adminer, Mailhog)
+docker-compose --profile dev up -d
+
+# View logs
+docker-compose logs -f api
+```
+
+**Services Started:**
+- API Server: `http://localhost:8080`
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- Elasticsearch: `localhost:9200`
+- Grafana: `http://localhost:3000`
+- Prometheus: `http://localhost:9090`
+
+### Manual Setup
+
+```bash
+# 1. Install dependencies
+go mod download
+
+# 2. Set up database
+psql $DATABASE_URL -f database/001_core_schema.sql
+psql $DATABASE_URL -f database/002_seed_data.sql
+psql $DATABASE_URL -f database/003_services_schema.sql
+
+# 3. Configure environment
+cp .env.example .env
+
+# 4. Run server
+make run
+```
+
+---
+
+## 📁 Project Structure
+
+```
+vendorplatform/
+├── api/                          # Platform products (4 products)
+│   ├── lifeos/platform.go
+│   ├── eventgpt/platform.go
+│   ├── vendornet/platform.go
+│   ├── homerescue/platform.go
+│   ├── server.go
+│   └── handlers.go
+├── cmd/server/main.go            # Entry point
+├── internal/                     # Core services (6 services)
+│   ├── auth/service.go
+│   ├── payment/service.go
+│   ├── notification/service.go
+│   ├── search/service.go
+│   ├── storage/service.go
+│   └── worker/service.go
+├── pkg/                          # Shared utilities
+│   ├── config/
+│   ├── logger/
+│   └── middleware/
+├── database/                     # SQL schemas (3 files)
+│   ├── 001_core_schema.sql
+│   ├── 002_seed_data.sql
+│   └── 003_services_schema.sql
+├── recommendation-engine/        # ML recommendations
+│   ├── engine.go
+│   └── ml_service.py
+├── deployments/
+│   ├── docker/Dockerfile
+│   └── terraform/main.tf
+├── mobile/flutter/               # Mobile app scaffold
+├── web/admin/                    # Admin dashboard scaffold
+├── monitoring/prometheus.yml     # Observability
+├── docs/                         # Documentation
+├── business-models/              # Business canvases
+├── tests/                        # Test suites
+├── docker-compose.yml
+├── Makefile
+├── go.mod
+└── requirements.txt
+```
+
+---
+
+## 📈 Business Model Summary
+
+| Revenue Stream | LifeOS | EventGPT | VendorNet | HomeRescue |
+|----------------|--------|----------|-----------|------------|
+| Transaction Fee | 8-15% | 8-12% | 2.5-3% | 15-20% |
+| Vendor Subscription | ₦10-30K/mo | ₦15-50K/mo | ₦15-50K/mo | ₦20-50K/mo |
+| Consumer Subscription | ₦5-12K/mo | $10-30/mo | - | ₦5-10K/mo |
+
+---
+
+## 🔧 Make Commands
+
+```bash
+make build          # Build the binary
+make run            # Run the server
+make test           # Run tests
+make lint           # Run linter
+make docker-build   # Build Docker image
+make db-migrate     # Run migrations
+make db-seed        # Seed database
+make clean          # Clean build artifacts
+```
+
+---
+
+## 📄 License
+
+Proprietary - © 2025 BillyRonks Global Limited. All rights reserved.
+
+---
+
+## 📞 Contact
+
+- **Website:** vendorplatform.com
+- **Email:** support@vendorplatform.com
