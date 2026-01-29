@@ -1,69 +1,4 @@
-#!/usr/bin/env python3
-"""
-Repository Improver Agent
-Updated: Now calculates and updates completion percentage dynamically.
-"""
-
-import os
-import json
-import anthropic
-import requests
-from pathlib import Path
-from datetime import datetime
-
-class RepoImprover:
-    def __init__(self, github_token, anthropic_api_key, github_repo):
-        self.github_token = github_token
-        self.anthropic_api_key = anthropic_api_key
-        self.github_repo = github_repo
-        self.client = anthropic.Anthropic(api_key=anthropic_api_key)
-        self.assessment_file = Path(".factory-assessment.json")
-
-    def load_assessment(self):
-        """Load the assessment from repo_assessor."""
-        if not self.assessment_file.exists():
-            return {
-                "goals_achieved": "PARTIAL",
-                "prd_exists": False,
-                "missing_docs": [],
-                "completion_percentage": 50,
-                "next_steps": "IMPROVE"
-            }
-        return json.loads(self.assessment_file.read_text())
-
-    def save_assessment(self, assessment):
-        """Save the updated assessment back to disk."""
-        self.assessment_file.write_text(json.dumps(assessment, indent=2))
-        print(f"📈 Updated local assessment: {assessment['completion_percentage']}%")
-
-    # ... [scan_codebase and detect_architectural_gaps methods remain the same] ...
-
-    def generate_prd(self):
-        """Generate a PRD and return True if successful."""
-        assessment = self.load_assessment()
-        if assessment.get('prd_exists'):
-            return False
-
-        readme_path = Path("README.md")
-        readme_content = readme_path.read_text(encoding='utf-8') if readme_path.exists() else ""
-
-        prompt = f"Generate a comprehensive PRD based on: {readme_content}"
-        try:
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            prd_path = Path("docs/PRD.md")
-            prd_path.parent.mkdir(exist_ok=True)
-            prd_path.write_text(response.content[0].text)
-            print(f"✅ Generated PRD at {prd_path}")
-            return True
-        except Exception as e:
-            print(f"Error generating PRD: {e}")
-            return False
-
-    def create_github_issue(self, title, body, labels=None):
+def create_github_issue(self, title, body, labels=None):
         """Create a GitHub issue with @claude auto-trigger."""
         if not self.github_token or not self.github_repo:
             print(f"⚠️ Cannot create issue: {title}")
@@ -75,59 +10,52 @@ class RepoImprover:
             "Accept": "application/vnd.github.v3+json"
         }
 
-        formatted_body = f"@claude\n\n**Automated Analysis:**\n{body}"
-        data = {"title": title, "body": formatted_body, "labels": labels or []}
+        # FORCE THE TAG AT THE VERY TOP
+        # Using '\n\n' ensures GitHub's listener picks up the string clearly.
+        formatted_body = f"@claude\n\n{body}"
+
+        data = {
+            "title": title,
+            "body": formatted_body,
+            "labels": labels or []
+        }
 
         try:
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 201:
-                print(f"✅ Created issue: {response.json()['html_url']}")
+                issue_url = response.json()['html_url']
+                print(f"✅ Created issue with @claude trigger: {issue_url}")
             else:
-                print(f"⚠️ Failed to create issue: {response.status_code}")
+                print(f"⚠️ Failed: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"Error creating issue: {e}")
+            print(f"Error: {e}")
 
     def run(self):
-        """Run the improvement process and update progress."""
+        """Run improvement and ensure @claude is tagged."""
         print("🔧 Starting repository improvement...")
         assessment = self.load_assessment()
-        initial_percentage = assessment.get('completion_percentage', 50)
-        work_done_bonus = 0
-
-        # 1. Handle PRD Generation (Worth 15% progress)
-        if self.generate_prd():
-            work_done_bonus += 15
-            assessment['prd_exists'] = True
-
-        # 2. Handle Improvements/Gaps
+        
+        # Determine the content based on mode
         if assessment['next_steps'] == 'IMPROVE':
-            print("📈 Mode: IMPROVEMENT")
             gaps = self.detect_architectural_gaps()
+            if not gaps:
+                # If no gaps found, create a general 'optimization' issue to keep Claude active
+                self.create_github_issue(
+                    title="🔧 Routine Architecture Optimization",
+                    body="No critical gaps found. Claude, please perform a general code quality review.",
+                    labels=["improvement"]
+                )
             for gap in gaps:
-                work_done_bonus += 5 # Each gap identified/fixed is worth 5%
-                issue_body = f"## Issue Type\n{gap['issue_type']}\n\n## Fix Strategy\n{gap['fix_strategy']}"
                 self.create_github_issue(
                     title=f"🔧 Architecture Gap: {gap['title']}",
-                    body=issue_body,
+                    body=f"Type: {gap['issue_type']}\n\n{gap['description']}",
                     labels=["architecture", "improvement"]
                 )
         else:
+            # This is likely where your script is currently hitting
             print("🚧 Mode: CONTINUE DEVELOPMENT")
-            # Creating the roadmap issue itself is progress (worth 5%)
-            work_done_bonus += 5
-            
-            issue_body = f"## Status: {initial_percentage}%\n1. Review PRD\n2. Start implementation"
             self.create_github_issue(
-                title=f"🚧 Continue Development: {initial_percentage + work_done_bonus}% Complete",
-                body=issue_body,
-                labels=["development", "in-progress"]
+                title=f"🚧 Progress: {assessment['completion_percentage']}% Complete",
+                body=f"Project is in development mode. @claude, please review the PRD and suggest next implementation steps.",
+                labels=["development"]
             )
-
-        # Update and Save
-        new_percentage = min(initial_percentage + work_done_bonus, 100)
-        assessment['completion_percentage'] = new_percentage
-        self.save_assessment(assessment)
-        
-        print(f"\n✅ Improvement complete! Progress: {initial_percentage}% -> {new_percentage}%")
-
-# ... [Main block remains the same] ...
