@@ -17,6 +17,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+
+	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
 
 // Config holds application configuration
@@ -199,9 +202,18 @@ func (app *App) setupRouter() {
 	router.GET("/health", app.healthCheck)
 	router.GET("/ready", app.readinessCheck)
 
+	// Initialize services
+	vendorService := vendor.NewService(app.db, app.cache)
+
+	// Initialize handlers
+	vendorHandler := vendors.NewHandler(vendorService, app.logger)
+
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Vendor Management
+		vendorHandler.RegisterRoutes(v1)
+
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
 		{
