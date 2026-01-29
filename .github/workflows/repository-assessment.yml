@@ -52,6 +52,10 @@ jobs:
           python scripts/agents/repo_improver.py
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+<<<<<<< HEAD
+=======
+          # Use ADMIN TOKEN to ensure Claude is triggered by the issues created
+>>>>>>> 4e080de056defbb63f9c2e32de069ea8026314db
           GITHUB_TOKEN: ${{ secrets.FACTORY_ADMIN_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
@@ -60,6 +64,10 @@ jobs:
           git config user.name "Factory Bot"
           git config user.email "factory-bot@billyronks.com"
           git add docs/
+<<<<<<< HEAD
+=======
+          # Fixed the multi-line commit message issue below
+>>>>>>> 4e080de056defbb63f9c2e32de069ea8026314db
           git diff --staged --quiet || git commit -m "docs: generate missing documentation (Factory Improvement System)"
           git push
         continue-on-error: true
