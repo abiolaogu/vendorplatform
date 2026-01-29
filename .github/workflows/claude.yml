@@ -1,14 +1,14 @@
 name: Universal Factory Worker
 on:
   issues:
-    types: [opened, assigned]
+    types: [opened, edited, assigned] # Added 'edited' just in case
   issue_comment:
     types: [created]
 
 jobs:
   build:
-    # 1. LOGIC: Wake up for New Issues OR New Comments containing '@claude'
-    if: >
+    # 1. UPDATED LOGIC: Checks for @claude anywhere in the body
+    if: |
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
     
@@ -29,3 +29,13 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           model: "claude-3-5-sonnet-20241022"
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🤖 *Claude is on the move!*\n*Task:* ${{ github.event.issue.title }}\n*Link:* ${{ github.event.issue.html_url }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
