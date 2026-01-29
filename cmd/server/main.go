@@ -18,7 +18,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
 
@@ -204,15 +206,20 @@ func (app *App) setupRouter() {
 
 	// Initialize services
 	vendorService := vendor.NewService(app.db, app.cache)
+	bookingService := booking.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
+	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
 		// Vendor Management
 		vendorHandler.RegisterRoutes(v1)
+
+		// Booking Management
+		bookingHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
