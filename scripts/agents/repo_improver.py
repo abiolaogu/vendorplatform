@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Repository Improver Agent
-Fixed: Indentation, Dynamic Percentage, and @claude Trigger.
+Repository Improver Agent - vendorplatform Edition
+- Calculates progress dynamically
+- Injects codebase context into @claude issues
 """
 
 import os
@@ -19,7 +20,6 @@ class RepoImprover:
         self.assessment_file = Path(".factory-assessment.json")
 
     def load_assessment(self):
-        """Load the assessment from repo_assessor."""
         if not self.assessment_file.exists():
             return {
                 "goals_achieved": "PARTIAL",
@@ -31,79 +31,85 @@ class RepoImprover:
         return json.loads(self.assessment_file.read_text())
 
     def save_assessment(self, assessment):
-        """Save the updated assessment back to disk."""
         self.assessment_file.write_text(json.dumps(assessment, indent=2))
         print(f"📈 Updated local assessment: {assessment['completion_percentage']}%")
 
-    def create_github_issue(self, title, body, labels=None):
-        """Create a GitHub issue with @claude auto-trigger."""
-        if not self.github_token or not self.github_repo:
-            print(f"⚠️ Cannot create issue: {title}")
-            return
+    def scan_codebase(self):
+        """Gather code context to help Claude understand the project."""
+        repo_root = Path.cwd()
+        code_files = []
+        extensions = {'.py', '.js', '.ts', '.jsx', '.tsx', '.dart', '.go'}
+        ignore_dirs = {'.git', 'node_modules', 'dist', 'build', '.venv'}
 
-        url = f"https://api.github.com/repos/{self.github_repo}/issues"
-        headers = {
-            "Authorization": f"token {self.github_token}",
-            "Accept": "application/vnd.github.v3+json"
-        }
+        for path in repo_root.rglob('*'):
+            if path.is_file() and path.suffix in extensions:
+                if any(ignored in path.parts for ignored in ignore_dirs):
+                    continue
+                try:
+                    content = path.read_text(encoding='utf-8')
+                    code_files.append(f"--- File: {path.relative_to(repo_root)} ---\n{content[:1000]}")
+                except:
+                    pass
+            if len(code_files) >= 5: break # Limit context size
+        return "\n\n".join(code_files)
 
-        # The @claude trigger must be at the start of the body
-        formatted_body = f"@claude\n\n**Automated Analysis:**\n{body}"
-        data = {"title": title, "body": formatted_body, "labels": labels or []}
-
+    def generate_prd(self):
+        assessment = self.load_assessment()
+        if assessment.get('prd_exists'): return False
+        readme_path = Path("README.md")
+        readme_content = readme_path.read_text(encoding='utf-8') if readme_path.exists() else ""
         try:
-            response = requests.post(url, headers=headers, json=data)
-            if response.status_code == 201:
-                print(f"✅ Created issue with @claude: {response.json()['html_url']}")
-            else:
-                print(f"⚠️ Failed to create issue: {response.status_code}")
-        except Exception as e:
-            print(f"Error: {e}")
+            response = self.client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": f"Generate PRD: {readme_content}"}]
+            )
+            prd_path = Path("docs/PRD.md")
+            prd_path.parent.mkdir(exist_ok=True)
+            prd_path.write_text(response.content[0].text)
+            return True
+        except: return False
+
+    def create_github_issue(self, title, body, labels=None):
+        url = f"https://api.github.com/repos/{self.github_repo}/issues"
+        headers = {"Authorization": f"token {self.github_token}", "Accept": "application/vnd.github.v3+json"}
+        
+        # We add 'implement' to tell Claude to write code, not just talk
+        formatted_body = f"@claude implement\n\n{body}"
+        data = {"title": title, "body": formatted_body, "labels": labels or []}
+        requests.post(url, headers=headers, json=data)
 
     def run(self):
-        """Run the improvement process and update progress."""
-        print("🔧 Starting repository improvement...")
+        print("🔧 Starting vendorplatform improvement...")
         assessment = self.load_assessment()
-        initial_p = assessment.get('completion_percentage', 50)
-        bonus = 0
+        initial_percentage = assessment.get('completion_percentage', 50)
+        work_done_bonus = 0
+        
+        # Get codebase snapshot
+        context = self.scan_codebase()
 
-        # Logic for PRD (Value: 15%)
-        # Note: If generate_prd logic exists, call it here. 
-        # For now, we assume PRD generation adds to the bonus.
-        if not assessment.get('prd_exists'):
-            bonus += 15
+        if self.generate_prd():
+            work_done_bonus += 15
             assessment['prd_exists'] = True
 
         if assessment['next_steps'] == 'IMPROVE':
-            print("📈 Mode: IMPROVEMENT")
-            # Creating an architecture gap issue (Value: 5% per gap)
-            bonus += 5
-            self.create_github_issue(
-                title=f"🔧 Architecture Optimization Request",
-                body="Perform a Holy Trinity compliance check on the vendorplatform core logic.",
-                labels=["architecture", "improvement"]
-            )
+            # Handle Improvement Mode
+            work_done_bonus += 5
+            issue_body = f"## Context\n{context}\n\n## Task\nFix architectural gaps found in the context above."
+            self.create_github_issue(title="🔧 Architecture Improvement", body=issue_body, labels=["improvement"])
         else:
-            print("🚧 Mode: CONTINUE DEVELOPMENT")
-            bonus += 5
+            # Handle Development Mode
+            work_done_bonus += 5
+            issue_body = f"## Project Context\n{context}\n\n## Current Status: {initial_percentage}%\nClaude, analyze the code and implement the next logical feature for vendorplatform."
             self.create_github_issue(
-                title=f"🚧 Progress: {initial_p + bonus}% Complete",
-                body=f"Project is {initial_p + bonus}% complete. @claude, please suggest next steps.",
+                title=f"🚧 Continue Development: {initial_percentage + work_done_bonus}% Complete",
+                body=issue_body,
                 labels=["development"]
             )
 
-        # Update percentage and save
-        assessment['completion_percentage'] = min(initial_p + bonus, 100)
+        assessment['completion_percentage'] = min(initial_percentage + work_done_bonus, 100)
         self.save_assessment(assessment)
 
 if __name__ == "__main__":
-    token = os.getenv("GITHUB_TOKEN")
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    repo = os.getenv("GITHUB_REPOSITORY")
-    
-    if not api_key:
-        print("❌ Error: ANTHROPIC_API_KEY not set")
-        exit(1)
-
-    improver = RepoImprover(token, api_key, repo)
+    improver = RepoImprover(os.getenv("GITHUB_TOKEN"), os.getenv("ANTHROPIC_API_KEY"), os.getenv("GITHUB_REPOSITORY"))
     improver.run()
