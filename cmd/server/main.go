@@ -25,13 +25,9 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
-	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
@@ -252,15 +248,16 @@ func (app *App) setupRouter() {
 	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
-	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
+
+	// Initialize LifeOS components
+	lifeosAPI := lifeos.NewLifeOSAPI(app.db, app.cache, app.logger)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
-	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 
@@ -282,13 +279,13 @@ func (app *App) setupRouter() {
 		reviewHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
-		lifeos := v1.Group("/lifeos")
+		lifeosGroup := v1.Group("/lifeos")
 		{
-			lifeos.POST("/events", app.createLifeEvent)
-			lifeos.GET("/events/:id", app.getLifeEvent)
-			lifeos.GET("/events/:id/plan", app.getEventPlan)
-			lifeos.POST("/events/:id/confirm", app.confirmDetectedEvent)
-			lifeos.GET("/detected", app.getDetectedEvents)
+			lifeosGroup.POST("/events", app.createLifeEventHandler(lifeosAPI))
+			lifeosGroup.GET("/events/:id", app.getLifeEventHandler(lifeosAPI))
+			lifeosGroup.GET("/events/:id/plan", app.getEventPlanHandler(lifeosAPI))
+			lifeosGroup.POST("/events/:id/confirm", app.confirmDetectedEventHandler(lifeosAPI))
+			lifeosGroup.GET("/detected", app.getDetectedEventsHandler(lifeosAPI))
 		}
 
 		// EventGPT - Conversational AI Planner
@@ -407,12 +404,153 @@ func (app *App) readinessCheck(c *gin.Context) {
 	})
 }
 
-// Placeholder handlers (to be implemented with actual logic)
-func (app *App) createLifeEvent(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getLifeEvent(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEventPlan(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) confirmDetectedEvent(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getDetectedEvents(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
+// =============================================================================
+// LIFEOS HANDLERS
+// =============================================================================
+
+// createLifeEventHandler creates a new life event
+func (app *App) createLifeEventHandler(api *lifeos.LifeOSAPI) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get user ID from auth context (would typically come from JWT middleware)
+		userIDStr := c.GetString("user_id")
+		if userIDStr == "" {
+			// For now, use a query parameter or default user
+			userIDStr = c.Query("user_id")
+			if userIDStr == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id required"})
+				return
+			}
+		}
+
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id format"})
+			return
+		}
+
+		// Parse request body
+		var req lifeos.CreateEventRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Create event
+		event, err := api.CreateEvent(c.Request.Context(), userID, req)
+		if err != nil {
+			app.logger.Error("Failed to create life event", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create event"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, event)
+	}
+}
+
+// getLifeEventHandler retrieves a specific life event
+func (app *App) getLifeEventHandler(api *lifeos.LifeOSAPI) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventIDStr := c.Param("id")
+		eventID, err := uuid.Parse(eventIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event_id format"})
+			return
+		}
+
+		event, err := api.GetEvent(c.Request.Context(), eventID)
+		if err != nil {
+			app.logger.Error("Failed to get life event", zap.Error(err))
+			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, event)
+	}
+}
+
+// getEventPlanHandler returns the orchestration plan for an event
+func (app *App) getEventPlanHandler(api *lifeos.LifeOSAPI) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventIDStr := c.Param("id")
+		eventID, err := uuid.Parse(eventIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event_id format"})
+			return
+		}
+
+		plan, err := api.GetEventPlan(c.Request.Context(), eventID)
+		if err != nil {
+			app.logger.Error("Failed to get event plan", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate plan"})
+			return
+		}
+
+		c.JSON(http.StatusOK, plan)
+	}
+}
+
+// confirmDetectedEventHandler confirms a detected event with additional details
+func (app *App) confirmDetectedEventHandler(api *lifeos.LifeOSAPI) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		eventIDStr := c.Param("id")
+		eventID, err := uuid.Parse(eventIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event_id format"})
+			return
+		}
+
+		// Parse update request
+		var req lifeos.CreateEventRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Confirm event with updates
+		event, err := api.ConfirmDetectedEvent(c.Request.Context(), eventID, req)
+		if err != nil {
+			app.logger.Error("Failed to confirm detected event", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm event"})
+			return
+		}
+
+		c.JSON(http.StatusOK, event)
+	}
+}
+
+// getDetectedEventsHandler returns events detected for a user
+func (app *App) getDetectedEventsHandler(api *lifeos.LifeOSAPI) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Get user ID from auth context
+		userIDStr := c.GetString("user_id")
+		if userIDStr == "" {
+			userIDStr = c.Query("user_id")
+			if userIDStr == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id required"})
+				return
+			}
+		}
+
+		userID, err := uuid.Parse(userIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id format"})
+			return
+		}
+
+		// Get detected events
+		events, err := api.GetDetectedEvents(c.Request.Context(), userID)
+		if err != nil {
+			app.logger.Error("Failed to get detected events", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to detect events"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"events": events,
+			"count":  len(events),
+		})
+	}
+}
 
 func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
