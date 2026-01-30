@@ -22,16 +22,13 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/api/services"
+	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
-	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
@@ -250,15 +247,15 @@ func (app *App) setupRouter() {
 	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
-	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
+	serviceService := service.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
-	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
+	serviceHandler := services.NewHandler(serviceService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -269,8 +266,12 @@ func (app *App) setupRouter() {
 		// Vendor Management
 		vendorHandler.RegisterRoutes(v1)
 
+		// Service Management
+		serviceHandler.RegisterRoutes(v1)
+
 		// HomeRescue - Emergency Services
 		homerescueHandler.RegisterRoutes(v1)
+
 		// Booking Management
 		bookingHandler.RegisterRoutes(v1)
 
@@ -675,6 +676,3 @@ func (app *App) getBundleRecommendations(c *gin.Context) {
 		"algorithm_version": resp.AlgorithmVersion,
 	})
 }
-func (app *App) getServiceRecommendations(c *gin.Context) { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getVendorRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getBundleRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
