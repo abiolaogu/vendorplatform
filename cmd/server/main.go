@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
@@ -26,6 +27,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
 
@@ -222,12 +224,14 @@ func (app *App) setupRouter() {
 	vendorService := vendor.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
+	reviewService := review.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
 	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
+	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -242,6 +246,9 @@ func (app *App) setupRouter() {
 		homerescueHandler.RegisterRoutes(v1)
 		// Booking Management
 		bookingHandler.RegisterRoutes(v1)
+
+		// Review & Rating System
+		reviewHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
