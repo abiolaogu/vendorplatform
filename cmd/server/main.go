@@ -23,6 +23,9 @@ import (
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
+	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
@@ -246,12 +249,14 @@ func (app *App) setupRouter() {
 	}
 	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
+	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
 	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
+	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 
@@ -297,6 +302,17 @@ func (app *App) setupRouter() {
 			vendornet.POST("/referrals", app.createReferral)
 			vendornet.PUT("/referrals/:id/status", app.updateReferralStatus)
 			vendornet.GET("/analytics", app.getNetworkAnalytics)
+		}
+
+		// HomeRescue - Emergency Services
+		homerescue := v1.Group("/homerescue")
+		{
+			homerescue.POST("/emergencies", homerescueHandler.CreateEmergency)
+			homerescue.GET("/emergencies/:id", homerescueHandler.GetEmergencyStatus)
+			homerescue.GET("/emergencies/:id/tracking", homerescueHandler.GetEmergencyTracking)
+			homerescue.POST("/technicians/location", homerescueHandler.UpdateTechLocation)
+			homerescue.PUT("/emergencies/:id/accept", homerescueHandler.AcceptEmergency)
+			homerescue.PUT("/emergencies/:id/complete", homerescueHandler.CompleteEmergency)
 		}
 
 		// Recommendations
@@ -403,12 +419,7 @@ func (app *App) createReferral(c *gin.Context)        { c.JSON(http.StatusNotImp
 func (app *App) updateReferralStatus(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) getNetworkAnalytics(c *gin.Context)   { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 
-func (app *App) createEmergency(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEmergencyStatus(c *gin.Context)    { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEmergencyTracking(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) updateTechLocation(c *gin.Context)    { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) acceptEmergency(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) completeEmergency(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
+// HomeRescue handlers are now implemented in api/homerescue/handlers.go
 
 // getServiceRecommendations returns adjacent service recommendations based on context
 func (app *App) getServiceRecommendations(c *gin.Context) {
