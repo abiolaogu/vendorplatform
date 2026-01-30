@@ -18,7 +18,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
 
@@ -203,14 +205,27 @@ func (app *App) setupRouter() {
 	router.GET("/ready", app.readinessCheck)
 
 	// Initialize services
+	authConfig := &auth.Config{
+		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production-please"),
+		AccessTokenExpiry:  15 * time.Minute,
+		RefreshTokenExpiry: 7 * 24 * time.Hour,
+		BCryptCost:         12,
+		MaxSessionsPerUser: 5,
+		VerificationExpiry: 24 * time.Hour,
+	}
+	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
 
 	// Initialize handlers
+	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
+		// Authentication (public)
+		authHandler.RegisterRoutes(v1)
+
 		// Vendor Management
 		vendorHandler.RegisterRoutes(v1)
 
