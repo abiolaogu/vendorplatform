@@ -24,15 +24,12 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
+	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
-	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
 
@@ -250,15 +247,15 @@ func (app *App) setupRouter() {
 	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
-	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
+	lifeosService := lifeos.NewService(app.db, app.cache, app.logger)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
-	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
+	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -277,11 +274,11 @@ func (app *App) setupRouter() {
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
 		{
-			lifeos.POST("/events", app.createLifeEvent)
-			lifeos.GET("/events/:id", app.getLifeEvent)
-			lifeos.GET("/events/:id/plan", app.getEventPlan)
-			lifeos.POST("/events/:id/confirm", app.confirmDetectedEvent)
-			lifeos.GET("/detected", app.getDetectedEvents)
+			lifeos.POST("/events", lifeosHandler.CreateLifeEvent)
+			lifeos.GET("/events/:id", lifeosHandler.GetLifeEvent)
+			lifeos.GET("/events/:id/plan", lifeosHandler.GetEventPlan)
+			lifeos.POST("/events/:id/confirm", lifeosHandler.ConfirmDetectedEvent)
+			lifeos.GET("/detected", lifeosHandler.GetDetectedEvents)
 		}
 
 		// EventGPT - Conversational AI Planner
@@ -400,13 +397,7 @@ func (app *App) readinessCheck(c *gin.Context) {
 	})
 }
 
-// Placeholder handlers (to be implemented with actual logic)
-func (app *App) createLifeEvent(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getLifeEvent(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEventPlan(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) confirmDetectedEvent(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getDetectedEvents(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-
+// Placeholder handlers for EventGPT and VendorNet (to be implemented)
 func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) getConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
@@ -675,6 +666,3 @@ func (app *App) getBundleRecommendations(c *gin.Context) {
 		"algorithm_version": resp.AlgorithmVersion,
 	})
 }
-func (app *App) getServiceRecommendations(c *gin.Context) { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getVendorRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getBundleRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
