@@ -22,13 +22,12 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
@@ -43,12 +42,13 @@ type Config struct {
 
 // App holds the application dependencies
 type App struct {
-	config            *Config
-	db                *pgxpool.Pool
-	cache             *redis.Client
-	logger            *zap.Logger
-	router            *gin.Engine
+	config               *Config
+	db                   *pgxpool.Pool
+	cache                *redis.Client
+	logger               *zap.Logger
+	router               *gin.Engine
 	recommendationEngine *recommendation.Engine
+	lifeosService        *lifeos.Service
 }
 
 func main() {
@@ -248,6 +248,7 @@ func (app *App) setupRouter() {
 	vendorService := vendor.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
+	app.lifeosService = lifeos.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
@@ -384,12 +385,171 @@ func (app *App) readinessCheck(c *gin.Context) {
 	})
 }
 
-// Placeholder handlers (to be implemented with actual logic)
-func (app *App) createLifeEvent(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getLifeEvent(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEventPlan(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) confirmDetectedEvent(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getDetectedEvents(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
+// LifeOS Handlers
+func (app *App) createLifeEvent(c *gin.Context) {
+	var req lifeos.CreateEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	event, err := app.lifeosService.CreateEvent(c.Request.Context(), &req)
+	if err != nil {
+		app.logger.Error("Failed to create life event",
+			zap.Error(err),
+			zap.String("user_id", req.UserID.String()),
+			zap.String("event_type", string(req.EventType)),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create event"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"event": event,
+	})
+}
+
+func (app *App) getLifeEvent(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
+		return
+	}
+
+	// In production, get userID from JWT token
+	// For now, we'll require it as a query param
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id required"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	event, err := app.lifeosService.GetEvent(c.Request.Context(), eventID, userID)
+	if err != nil {
+		if err == lifeos.ErrEventNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+			return
+		}
+		app.logger.Error("Failed to get life event",
+			zap.Error(err),
+			zap.String("event_id", eventID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get event"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"event": event,
+	})
+}
+
+func (app *App) getEventPlan(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
+		return
+	}
+
+	// In production, get userID from JWT token
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id required"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	plan, err := app.lifeosService.GetEventPlan(c.Request.Context(), eventID, userID)
+	if err != nil {
+		if err == lifeos.ErrEventNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "event not found"})
+			return
+		}
+		app.logger.Error("Failed to get event plan",
+			zap.Error(err),
+			zap.String("event_id", eventID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate plan"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"plan": plan,
+	})
+}
+
+func (app *App) confirmDetectedEvent(c *gin.Context) {
+	eventID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid event ID"})
+		return
+	}
+
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id required"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	event, err := app.lifeosService.ConfirmDetectedEvent(c.Request.Context(), eventID, userID)
+	if err != nil {
+		app.logger.Error("Failed to confirm detected event",
+			zap.Error(err),
+			zap.String("event_id", eventID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to confirm event"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"event": event,
+	})
+}
+
+func (app *App) getDetectedEvents(c *gin.Context) {
+	userIDStr := c.Query("user_id")
+	if userIDStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id required"})
+		return
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user ID"})
+		return
+	}
+
+	events, err := app.lifeosService.GetDetectedEvents(c.Request.Context(), userID)
+	if err != nil {
+		app.logger.Error("Failed to get detected events",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get detected events"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"detected_events": events,
+		"count":           len(events),
+	})
+}
 
 func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
@@ -664,6 +824,3 @@ func (app *App) getBundleRecommendations(c *gin.Context) {
 		"algorithm_version": resp.AlgorithmVersion,
 	})
 }
-func (app *App) getServiceRecommendations(c *gin.Context) { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getVendorRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getBundleRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
