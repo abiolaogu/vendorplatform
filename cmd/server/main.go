@@ -22,6 +22,7 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
@@ -32,6 +33,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
@@ -252,6 +254,7 @@ func (app *App) setupRouter() {
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
 	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
+	reviewService := review.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
@@ -259,6 +262,7 @@ func (app *App) setupRouter() {
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
+	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -273,6 +277,9 @@ func (app *App) setupRouter() {
 		homerescueHandler.RegisterRoutes(v1)
 		// Booking Management
 		bookingHandler.RegisterRoutes(v1)
+
+		// Review & Rating System
+		reviewHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
