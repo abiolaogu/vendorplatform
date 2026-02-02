@@ -25,15 +25,11 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
-	apihomerescue "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
-	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
-	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
@@ -251,16 +247,15 @@ func (app *App) setupRouter() {
 	}
 	authService := auth.NewService(app.db, app.cache, authConfig)
 	vendorService := vendor.NewService(app.db, app.cache)
+	serviceManager := service.NewServiceManager(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
-	homerescueService := homerescue.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
-	vendorHandler := vendors.NewHandler(vendorService, app.logger)
+	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
-	homerescueHandler := apihomerescue.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 
@@ -682,6 +677,3 @@ func (app *App) getBundleRecommendations(c *gin.Context) {
 		"algorithm_version": resp.AlgorithmVersion,
 	})
 }
-func (app *App) getServiceRecommendations(c *gin.Context) { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getVendorRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getBundleRecommendations(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
