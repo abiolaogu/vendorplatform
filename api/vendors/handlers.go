@@ -9,20 +9,23 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
 
 // Handler handles vendor HTTP requests
 type Handler struct {
-	vendorService *vendor.Service
-	logger        *zap.Logger
+	vendorService  *vendor.Service
+	serviceManager *service.ServiceManager
+	logger         *zap.Logger
 }
 
 // NewHandler creates a new vendor handler
-func NewHandler(vendorService *vendor.Service, logger *zap.Logger) *Handler {
+func NewHandler(vendorService *vendor.Service, serviceManager *service.ServiceManager, logger *zap.Logger) *Handler {
 	return &Handler{
-		vendorService: vendorService,
-		logger:        logger,
+		vendorService:  vendorService,
+		serviceManager: serviceManager,
+		logger:         logger,
 	}
 }
 
@@ -341,14 +344,76 @@ func (h *Handler) GetVendorServices(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement service listing
-	// For now, return placeholder
+	// Build service list options
+	opts := &service.ServiceListOptions{
+		VendorID: &id,
+		Limit:    20,
+		Offset:   0,
+	}
+
+	// Parse query parameters
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			opts.Limit = limit
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			opts.Offset = offset
+		}
+	}
+
+	if status := c.Query("status"); status != "" {
+		opts.Status = &status
+	}
+
+	if availableStr := c.Query("available"); availableStr != "" {
+		available := availableStr == "true"
+		opts.IsAvailable = &available
+	}
+
+	if featuredStr := c.Query("featured"); featuredStr != "" {
+		featured := featuredStr == "true"
+		opts.IsFeatured = &featured
+	}
+
+	if categoryID := c.Query("category_id"); categoryID != "" {
+		if catID, err := uuid.Parse(categoryID); err == nil {
+			opts.CategoryID = &catID
+		}
+	}
+
+	if sortBy := c.Query("sort_by"); sortBy != "" {
+		opts.SortBy = sortBy
+	}
+
+	if sortOrder := c.Query("sort_order"); sortOrder != "" {
+		opts.SortOrder = sortOrder
+	}
+
+	// Get services
+	services, total, err := h.serviceManager.GetByVendorID(c.Request.Context(), id, opts)
+	if err != nil {
+		h.logger.Error("Failed to get vendor services",
+			zap.Error(err),
+			zap.String("vendor_id", id.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "fetch_failed",
+			"message": "Failed to retrieve vendor services",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    []interface{}{},
+		"data":    services,
 		"meta": gin.H{
 			"vendor_id": id.String(),
-			"total":     0,
+			"total":     total,
+			"limit":     opts.Limit,
+			"offset":    opts.Offset,
 		},
 	})
 }
