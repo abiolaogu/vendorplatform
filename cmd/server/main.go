@@ -26,9 +26,11 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
+	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
@@ -251,6 +253,7 @@ func (app *App) setupRouter() {
 	vendorService := vendor.NewService(app.db, app.cache)
 	serviceManager := service.NewServiceManager(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
+	lifeosService := lifeos.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
@@ -269,6 +272,7 @@ func (app *App) setupRouter() {
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
+	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 	paymentHandler := payments.NewHandler(paymentService, app.logger)
@@ -294,14 +298,7 @@ func (app *App) setupRouter() {
 		paymentHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
-		lifeos := v1.Group("/lifeos")
-		{
-			lifeos.POST("/events", app.createLifeEvent)
-			lifeos.GET("/events/:id", app.getLifeEvent)
-			lifeos.GET("/events/:id/plan", app.getEventPlan)
-			lifeos.POST("/events/:id/confirm", app.confirmDetectedEvent)
-			lifeos.GET("/detected", app.getDetectedEvents)
-		}
+		lifeosHandler.RegisterRoutes(v1)
 
 		// EventGPT - Conversational AI Planner
 		eventgpt := v1.Group("/eventgpt")
@@ -420,12 +417,6 @@ func (app *App) readinessCheck(c *gin.Context) {
 }
 
 // Placeholder handlers (to be implemented with actual logic)
-func (app *App) createLifeEvent(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getLifeEvent(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getEventPlan(c *gin.Context)          { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) confirmDetectedEvent(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getDetectedEvents(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-
 func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) getConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
