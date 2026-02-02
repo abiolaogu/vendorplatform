@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -874,9 +875,6 @@ func (s *Service) GetTransactionByReference(ctx context.Context, reference strin
 	
 	json.Unmarshal(metadataJSON, &txn.Metadata)
 	json.Unmarshal(providerDataJSON, &txn.ProviderData)
-	
+
 	return &txn, nil
 }
-
-// Need strings import
-import "strings"

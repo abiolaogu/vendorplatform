@@ -22,12 +22,14 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
@@ -246,6 +248,19 @@ func (app *App) setupRouter() {
 		VerificationExpiry: 24 * time.Hour,
 	}
 	authService := auth.NewService(app.db, app.cache, authConfig)
+
+	paymentConfig := &payment.Config{
+		PaystackSecretKey:    getEnv("PAYSTACK_SECRET_KEY", ""),
+		PaystackPublicKey:    getEnv("PAYSTACK_PUBLIC_KEY", ""),
+		FlutterwaveSecretKey: getEnv("FLUTTERWAVE_SECRET_KEY", ""),
+		FlutterwavePublicKey: getEnv("FLUTTERWAVE_PUBLIC_KEY", ""),
+		WebhookSecret:        getEnv("WEBHOOK_SECRET", ""),
+		DefaultCurrency:      "NGN",
+		PlatformFeePercent:   10.0, // 10% platform fee
+		EscrowExpiryDays:     30,   // 30 days escrow expiry
+	}
+	paymentService := payment.NewService(app.db, app.cache, paymentConfig)
+
 	vendorService := vendor.NewService(app.db, app.cache)
 	serviceManager := service.NewServiceManager(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
@@ -254,6 +269,7 @@ func (app *App) setupRouter() {
 
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
+	paymentHandler := payments.NewHandler(paymentService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
@@ -264,6 +280,9 @@ func (app *App) setupRouter() {
 	{
 		// Authentication (public)
 		authHandler.RegisterRoutes(v1)
+
+		// Payment Processing
+		paymentHandler.RegisterRoutes(v1)
 
 		// Vendor Management
 		vendorHandler.RegisterRoutes(v1)
