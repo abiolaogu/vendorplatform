@@ -22,12 +22,14 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
@@ -252,12 +254,24 @@ func (app *App) setupRouter() {
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
+	paymentConfig := &payment.Config{
+		PaystackSecretKey:    getEnv("PAYSTACK_SECRET_KEY", ""),
+		PaystackPublicKey:    getEnv("PAYSTACK_PUBLIC_KEY", ""),
+		FlutterwaveSecretKey: getEnv("FLUTTERWAVE_SECRET_KEY", ""),
+		FlutterwavePublicKey: getEnv("FLUTTERWAVE_PUBLIC_KEY", ""),
+		DefaultCurrency:      getEnv("DEFAULT_CURRENCY", "NGN"),
+		PlatformFeePercent:   5.0, // 5% platform fee
+		EscrowExpiryDays:     30,
+	}
+	paymentService := payment.NewService(app.db, app.cache, paymentConfig)
+
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
+	paymentHandler := payments.NewHandler(paymentService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -275,6 +289,9 @@ func (app *App) setupRouter() {
 
 		// Review & Rating System
 		reviewHandler.RegisterRoutes(v1)
+
+		// Payment Processing & Escrow
+		paymentHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
 		lifeos := v1.Group("/lifeos")
