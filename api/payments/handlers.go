@@ -324,11 +324,24 @@ func (h *Handler) GetTransaction(c *gin.Context) {
 		return
 	}
 
-	// TODO: Implement GetTransactionByID in payment service
-	_ = txnID
-	_ = userID
+	ctx := c.Request.Context()
+	txn, err := h.paymentService.GetTransactionByID(ctx, txnID)
+	if err != nil {
+		h.logger.Error("Failed to get transaction",
+			zap.Error(err),
+			zap.String("transaction_id", txnID.String()),
+		)
+		c.JSON(http.StatusNotFound, gin.H{"error": "transaction not found"})
+		return
+	}
 
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	// Verify ownership - user must be either the payer or recipient
+	if txn.UserID != userID && (txn.VendorID == nil || *txn.VendorID != userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to view this transaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, txn)
 }
 
 // GetWallet retrieves user's wallet information
@@ -531,12 +544,31 @@ func (h *Handler) GetWalletTransactions(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
-	_ = userID
-	_ = limit
-	_ = offset
+	// Validate pagination parameters
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
-	// TODO: Implement GetWalletTransactions in payment service
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	ctx := c.Request.Context()
+	transactions, err := h.paymentService.GetWalletTransactions(ctx, userID, limit, offset)
+	if err != nil {
+		h.logger.Error("Failed to get wallet transactions",
+			zap.Error(err),
+			zap.String("user_id", userID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve transactions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"transactions": transactions,
+		"limit":        limit,
+		"offset":       offset,
+		"count":        len(transactions),
+	})
 }
 
 // PayoutRequest represents a payout request
@@ -601,10 +633,34 @@ func (h *Handler) ListPayouts(c *gin.Context) {
 		return
 	}
 
-	_ = vendorID
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
-	// TODO: Implement ListPayouts in payment service
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	// Validate pagination parameters
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	ctx := c.Request.Context()
+	payouts, err := h.paymentService.ListPayouts(ctx, vendorID, limit, offset)
+	if err != nil {
+		h.logger.Error("Failed to list payouts",
+			zap.Error(err),
+			zap.String("vendor_id", vendorID.String()),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve payouts"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"payouts": payouts,
+		"limit":   limit,
+		"offset":  offset,
+		"count":   len(payouts),
+	})
 }
 
 // GetPayout retrieves a specific payout
@@ -622,11 +678,19 @@ func (h *Handler) GetPayout(c *gin.Context) {
 		return
 	}
 
-	_ = payoutID
-	_ = vendorID
+	ctx := c.Request.Context()
+	payout, err := h.paymentService.GetPayoutByID(ctx, payoutID, vendorID)
+	if err != nil {
+		h.logger.Error("Failed to get payout",
+			zap.Error(err),
+			zap.String("payout_id", payoutID.String()),
+			zap.String("vendor_id", vendorID.String()),
+		)
+		c.JSON(http.StatusNotFound, gin.H{"error": "payout not found"})
+		return
+	}
 
-	// TODO: Implement GetPayout in payment service
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	c.JSON(http.StatusOK, payout)
 }
 
 // GetEscrowStatus retrieves escrow status for a booking
@@ -644,11 +708,24 @@ func (h *Handler) GetEscrowStatus(c *gin.Context) {
 		return
 	}
 
-	_ = bookingID
-	_ = userID
+	ctx := c.Request.Context()
+	escrow, err := h.paymentService.GetEscrowByBookingID(ctx, bookingID)
+	if err != nil {
+		h.logger.Error("Failed to get escrow status",
+			zap.Error(err),
+			zap.String("booking_id", bookingID.String()),
+		)
+		c.JSON(http.StatusNotFound, gin.H{"error": "escrow not found"})
+		return
+	}
 
-	// TODO: Implement GetEscrowStatus in payment service
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	// Verify ownership - user must be either customer or vendor
+	if escrow.CustomerID != userID && escrow.VendorID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not authorized to view this escrow"})
+		return
+	}
+
+	c.JSON(http.StatusOK, escrow)
 }
 
 // PaystackWebhook handles Paystack webhook events
@@ -679,6 +756,26 @@ func (h *Handler) PaystackWebhook(c *gin.Context) {
 
 // FlutterwaveWebhook handles Flutterwave webhook events
 func (h *Handler) FlutterwaveWebhook(c *gin.Context) {
-	// TODO: Implement Flutterwave webhook handling
-	c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"})
+	secretHash := c.GetHeader("verif-hash")
+	if secretHash == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing verification hash"})
+		return
+	}
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if err := h.paymentService.HandleFlutterwaveWebhook(c.Request.Context(), body, secretHash); err != nil {
+		h.logger.Error("Failed to process Flutterwave webhook",
+			zap.Error(err),
+			zap.String("secret_hash", secretHash),
+		)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid webhook"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "success"})
 }

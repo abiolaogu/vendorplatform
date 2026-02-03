@@ -879,3 +879,295 @@ func (s *Service) GetTransactionByReference(ctx context.Context, reference strin
 	return &txn, nil
 }
 
+// GetTransactionByID retrieves a transaction by ID
+func (s *Service) GetTransactionByID(ctx context.Context, id uuid.UUID) (*Transaction, error) {
+	var txn Transaction
+	var metadataJSON, providerDataJSON []byte
+
+	query := `
+		SELECT id, reference, user_id, vendor_id, booking_id,
+		       type, status, provider, amount, currency, fee, net_amount,
+		       description, metadata, provider_ref, provider_data,
+		       paid_at, created_at, updated_at
+		FROM transactions WHERE id = $1
+	`
+
+	err := s.db.QueryRow(ctx, query, id).Scan(
+		&txn.ID, &txn.Reference, &txn.UserID, &txn.VendorID, &txn.BookingID,
+		&txn.Type, &txn.Status, &txn.Provider, &txn.Amount, &txn.Currency,
+		&txn.Fee, &txn.NetAmount, &txn.Description, &metadataJSON,
+		&txn.ProviderRef, &providerDataJSON, &txn.PaidAt, &txn.CreatedAt, &txn.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	json.Unmarshal(metadataJSON, &txn.Metadata)
+	json.Unmarshal(providerDataJSON, &txn.ProviderData)
+
+	return &txn, nil
+}
+
+// GetWalletTransactions retrieves transaction history for a wallet
+func (s *Service) GetWalletTransactions(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*Transaction, error) {
+	query := `
+		SELECT id, reference, user_id, vendor_id, booking_id,
+		       type, status, provider, amount, currency, fee, net_amount,
+		       description, metadata, provider_ref, provider_data,
+		       paid_at, created_at, updated_at
+		FROM transactions
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := s.db.Query(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transactions []*Transaction
+	for rows.Next() {
+		var txn Transaction
+		var metadataJSON, providerDataJSON []byte
+
+		err := rows.Scan(
+			&txn.ID, &txn.Reference, &txn.UserID, &txn.VendorID, &txn.BookingID,
+			&txn.Type, &txn.Status, &txn.Provider, &txn.Amount, &txn.Currency,
+			&txn.Fee, &txn.NetAmount, &txn.Description, &metadataJSON,
+			&txn.ProviderRef, &providerDataJSON, &txn.PaidAt, &txn.CreatedAt, &txn.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		json.Unmarshal(metadataJSON, &txn.Metadata)
+		json.Unmarshal(providerDataJSON, &txn.ProviderData)
+
+		transactions = append(transactions, &txn)
+	}
+
+	return transactions, nil
+}
+
+// ListPayouts retrieves payout history for a vendor
+func (s *Service) ListPayouts(ctx context.Context, vendorID uuid.UUID, limit, offset int) ([]*Transaction, error) {
+	query := `
+		SELECT id, reference, user_id, vendor_id, booking_id,
+		       type, status, provider, amount, currency, fee, net_amount,
+		       description, metadata, provider_ref, provider_data,
+		       paid_at, created_at, updated_at
+		FROM transactions
+		WHERE user_id = $1 AND type = $2
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+
+	rows, err := s.db.Query(ctx, query, vendorID, TypePayout, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var payouts []*Transaction
+	for rows.Next() {
+		var txn Transaction
+		var metadataJSON, providerDataJSON []byte
+
+		err := rows.Scan(
+			&txn.ID, &txn.Reference, &txn.UserID, &txn.VendorID, &txn.BookingID,
+			&txn.Type, &txn.Status, &txn.Provider, &txn.Amount, &txn.Currency,
+			&txn.Fee, &txn.NetAmount, &txn.Description, &metadataJSON,
+			&txn.ProviderRef, &providerDataJSON, &txn.PaidAt, &txn.CreatedAt, &txn.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		json.Unmarshal(metadataJSON, &txn.Metadata)
+		json.Unmarshal(providerDataJSON, &txn.ProviderData)
+
+		payouts = append(payouts, &txn)
+	}
+
+	return payouts, nil
+}
+
+// GetPayoutByID retrieves a specific payout with ownership verification
+func (s *Service) GetPayoutByID(ctx context.Context, payoutID, vendorID uuid.UUID) (*Transaction, error) {
+	var txn Transaction
+	var metadataJSON, providerDataJSON []byte
+
+	query := `
+		SELECT id, reference, user_id, vendor_id, booking_id,
+		       type, status, provider, amount, currency, fee, net_amount,
+		       description, metadata, provider_ref, provider_data,
+		       paid_at, created_at, updated_at
+		FROM transactions
+		WHERE id = $1 AND user_id = $2 AND type = $3
+	`
+
+	err := s.db.QueryRow(ctx, query, payoutID, vendorID, TypePayout).Scan(
+		&txn.ID, &txn.Reference, &txn.UserID, &txn.VendorID, &txn.BookingID,
+		&txn.Type, &txn.Status, &txn.Provider, &txn.Amount, &txn.Currency,
+		&txn.Fee, &txn.NetAmount, &txn.Description, &metadataJSON,
+		&txn.ProviderRef, &providerDataJSON, &txn.PaidAt, &txn.CreatedAt, &txn.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	json.Unmarshal(metadataJSON, &txn.Metadata)
+	json.Unmarshal(providerDataJSON, &txn.ProviderData)
+
+	return &txn, nil
+}
+
+// GetEscrowByBookingID retrieves escrow status for a booking
+func (s *Service) GetEscrowByBookingID(ctx context.Context, bookingID uuid.UUID) (*EscrowAccount, error) {
+	var escrow EscrowAccount
+
+	query := `
+		SELECT id, transaction_id, booking_id, customer_id, vendor_id,
+		       amount, currency, status, release_condition,
+		       released_at, dispute_id, expires_at, created_at
+		FROM escrow_accounts
+		WHERE booking_id = $1
+	`
+
+	err := s.db.QueryRow(ctx, query, bookingID).Scan(
+		&escrow.ID, &escrow.TransactionID, &escrow.BookingID,
+		&escrow.CustomerID, &escrow.VendorID, &escrow.Amount,
+		&escrow.Currency, &escrow.Status, &escrow.ReleaseCondition,
+		&escrow.ReleasedAt, &escrow.DisputeID, &escrow.ExpiresAt, &escrow.CreatedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &escrow, nil
+}
+
+// VerifyFlutterwave verifies a Flutterwave payment
+func (s *Service) VerifyFlutterwave(ctx context.Context, transactionID string) (*Transaction, error) {
+	httpReq, _ := http.NewRequestWithContext(ctx, "GET",
+		fmt.Sprintf("https://api.flutterwave.com/v3/transactions/%s/verify", transactionID), nil)
+	httpReq.Header.Set("Authorization", "Bearer "+s.config.FlutterwaveSecretKey)
+
+	resp, err := s.http.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
+			ID            int    `json:"id"`
+			TxRef         string `json:"tx_ref"`
+			FlwRef        string `json:"flw_ref"`
+			Amount        float64 `json:"amount"`
+			Currency      string `json:"currency"`
+			ChargedAmount float64 `json:"charged_amount"`
+			Status        string `json:"status"`
+			CreatedAt     string `json:"created_at"`
+		} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if result.Status != "success" {
+		return nil, errors.New(result.Message)
+	}
+
+	// Get transaction from database by reference
+	txn, err := s.GetTransactionByReference(ctx, result.Data.TxRef)
+	if err != nil {
+		return nil, err
+	}
+
+	// Update based on provider response
+	if result.Data.Status == "successful" {
+		txn.Status = StatusSuccess
+		createdAt, _ := time.Parse(time.RFC3339, result.Data.CreatedAt)
+		txn.PaidAt = &createdAt
+		txn.ProviderRef = result.Data.FlwRef
+	} else {
+		txn.Status = StatusFailed
+	}
+
+	txn.UpdatedAt = time.Now()
+	s.saveTransaction(ctx, txn)
+
+	// If successful and has escrow, update escrow status
+	if txn.Status == StatusSuccess && txn.VendorID != nil {
+		s.updateEscrowOnPayment(ctx, txn.ID)
+	}
+
+	return txn, nil
+}
+
+// HandleFlutterwaveWebhook processes Flutterwave webhook events
+func (s *Service) HandleFlutterwaveWebhook(ctx context.Context, payload []byte, secretHash string) error {
+	// Verify secret hash
+	if secretHash != s.config.WebhookSecret {
+		return errors.New("invalid secret hash")
+	}
+
+	var event struct {
+		Event string `json:"event"`
+		Data  struct {
+			ID     int     `json:"id"`
+			TxRef  string  `json:"tx_ref"`
+			FlwRef string  `json:"flw_ref"`
+			Amount float64 `json:"amount"`
+			Status string  `json:"status"`
+		} `json:"data"`
+	}
+
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return err
+	}
+
+	// Handle different event types
+	switch event.Event {
+	case "charge.completed":
+		if event.Data.Status == "successful" {
+			return s.handleFlutterwaveChargeSuccess(ctx, event.Data.TxRef)
+		}
+	}
+
+	return nil
+}
+
+func (s *Service) handleFlutterwaveChargeSuccess(ctx context.Context, txRef string) error {
+	txn, err := s.GetTransactionByReference(ctx, txRef)
+	if err != nil {
+		return err
+	}
+
+	// Update transaction status
+	txn.Status = StatusSuccess
+	now := time.Now()
+	txn.PaidAt = &now
+	txn.UpdatedAt = now
+
+	if err := s.saveTransaction(ctx, txn); err != nil {
+		return err
+	}
+
+	// If has escrow, update escrow status
+	if txn.VendorID != nil {
+		return s.updateEscrowOnPayment(ctx, txn.ID)
+	}
+
+	return nil
+}
+
