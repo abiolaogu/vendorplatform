@@ -1914,6 +1914,11 @@ func (api *EventGPTAPI) loadConversation(ctx context.Context, convID uuid.UUID) 
 	return &conv, nil
 }
 
+// LoadConversation is a public wrapper for loadConversation
+func (api *EventGPTAPI) LoadConversation(ctx context.Context, convID uuid.UUID) (*Conversation, error) {
+	return api.loadConversation(ctx, convID)
+}
+
 /*
 ================================================================================
 SECTION 4: BUSINESS MODEL
