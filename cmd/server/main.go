@@ -433,11 +433,355 @@ func (app *App) readinessCheck(c *gin.Context) {
 	})
 }
 
-// Placeholder handlers (to be implemented with actual logic)
-func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) endConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
+// =============================================================================
+// EVENTGPT CONVERSATION HANDLERS
+// =============================================================================
+
+// startConversation initializes a new EventGPT conversation session
+func (app *App) startConversation(c *gin.Context) {
+	// Get user ID from context (would be set by auth middleware)
+	userIDStr := c.GetString("user_id")
+	if userIDStr == "" {
+		// For testing, allow anonymous conversations
+		userIDStr = uuid.New().String()
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	// Create new conversation
+	conversationID := uuid.New()
+	now := time.Now()
+
+	// Store in database
+	query := `
+		INSERT INTO conversations (
+			id, user_id, session_type, conversation_state,
+			current_intent, slot_values, messages, turn_count,
+			short_term_memory, language, channel, started_at, last_message_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+	`
+
+	channel := c.DefaultQuery("channel", "web")
+	emptyJSON := []byte("{}")
+	emptyArray := []byte("[]")
+
+	_, err = app.db.Exec(c.Request.Context(), query,
+		conversationID, userID, "general_inquiry", "welcome",
+		emptyJSON, emptyJSON, emptyArray, 0,
+		emptyJSON, "en", channel, now, now,
+	)
+
+	if err != nil {
+		app.logger.Error("Failed to create conversation", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start conversation"})
+		return
+	}
+
+	// Return welcome message
+	c.JSON(http.StatusCreated, gin.H{
+		"conversation_id": conversationID.String(),
+		"message": gin.H{
+			"role":    "assistant",
+			"content": "Hello! 👋 I'm EventGPT, your AI event planning assistant. I can help you plan weddings, birthdays, corporate events, and more. What are you celebrating?",
+			"quick_replies": []gin.H{
+				{"title": "Plan a wedding", "payload": "create_event:wedding"},
+				{"title": "Plan a birthday", "payload": "create_event:birthday"},
+				{"title": "Find a vendor", "payload": "find_vendor"},
+				{"title": "Get recommendations", "payload": "get_recommendation"},
+			},
+		},
+		"session_type": "general_inquiry",
+	})
+}
+
+// sendMessage processes a user message in an EventGPT conversation
+func (app *App) sendMessage(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	var req struct {
+		Message string `json:"message" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Message is required"})
+		return
+	}
+
+	// Get conversation from database
+	var conv struct {
+		UserID    uuid.UUID
+		State     string
+		TurnCount int
+		Messages  []byte
+	}
+
+	query := `
+		SELECT user_id, conversation_state, turn_count, messages
+		FROM conversations
+		WHERE id = $1
+	`
+
+	err = app.db.QueryRow(c.Request.Context(), query, conversationID).Scan(
+		&conv.UserID, &conv.State, &conv.TurnCount, &conv.Messages,
+	)
+
+	if err != nil {
+		app.logger.Error("Failed to get conversation", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "Conversation not found"})
+		return
+	}
+
+	// Simple intent classification based on keywords
+	userMessage := req.Message
+	intent := classifyIntent(userMessage)
+
+	// Generate response based on intent
+	responseText, quickReplies := generateResponse(intent, conv.State)
+
+	// Update conversation in database
+	now := time.Now()
+	updateQuery := `
+		UPDATE conversations
+		SET turn_count = turn_count + 1,
+		    last_message_at = $2,
+		    conversation_state = $3
+		WHERE id = $1
+	`
+
+	newState := determineNextState(intent, conv.State)
+
+	_, err = app.db.Exec(c.Request.Context(), updateQuery,
+		conversationID, now, newState,
+	)
+
+	if err != nil {
+		app.logger.Warn("Failed to update conversation", zap.Error(err))
+	}
+
+	// Return response
+	response := gin.H{
+		"conversation_id": conversationID.String(),
+		"message": gin.H{
+			"role":      "assistant",
+			"content":   responseText,
+			"timestamp": now,
+		},
+	}
+
+	if len(quickReplies) > 0 {
+		response["message"].(gin.H)["quick_replies"] = quickReplies
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// getConversation retrieves conversation history
+func (app *App) getConversation(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	// Get conversation from database
+	query := `
+		SELECT id, user_id, session_type, conversation_state,
+		       turn_count, started_at, last_message_at
+		FROM conversations
+		WHERE id = $1
+	`
+
+	var conv struct {
+		ID            uuid.UUID
+		UserID        uuid.UUID
+		SessionType   string
+		State         string
+		TurnCount     int
+		StartedAt     time.Time
+		LastMessageAt time.Time
+	}
+
+	err = app.db.QueryRow(c.Request.Context(), query, conversationID).Scan(
+		&conv.ID, &conv.UserID, &conv.SessionType, &conv.State,
+		&conv.TurnCount, &conv.StartedAt, &conv.LastMessageAt,
+	)
+
+	if err != nil {
+		app.logger.Error("Failed to get conversation", zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "Conversation not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":               conv.ID.String(),
+		"user_id":          conv.UserID.String(),
+		"session_type":     conv.SessionType,
+		"conversation_state": conv.State,
+		"turn_count":       conv.TurnCount,
+		"started_at":       conv.StartedAt,
+		"last_message_at":  conv.LastMessageAt,
+	})
+}
+
+// endConversation closes an EventGPT conversation session
+func (app *App) endConversation(c *gin.Context) {
+	conversationIDStr := c.Param("id")
+	conversationID, err := uuid.Parse(conversationIDStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid conversation ID"})
+		return
+	}
+
+	// Update conversation to completed state
+	now := time.Now()
+	query := `
+		UPDATE conversations
+		SET conversation_state = 'completed',
+		    last_message_at = $2
+		WHERE id = $1
+	`
+
+	result, err := app.db.Exec(c.Request.Context(), query, conversationID, now)
+	if err != nil {
+		app.logger.Error("Failed to end conversation", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to end conversation"})
+		return
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Conversation not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Conversation ended successfully. Thank you for using EventGPT!",
+		"conversation_id": conversationID.String(),
+	})
+}
+
+// Helper functions for EventGPT conversation logic
+
+func classifyIntent(message string) string {
+	message = strings.ToLower(message)
+
+	// Simple keyword-based intent classification
+	if strings.Contains(message, "wedding") || strings.Contains(message, "married") {
+		return "create_event_wedding"
+	}
+	if strings.Contains(message, "birthday") || strings.Contains(message, "bday") {
+		return "create_event_birthday"
+	}
+	if strings.Contains(message, "find") && (strings.Contains(message, "vendor") ||
+		strings.Contains(message, "photographer") || strings.Contains(message, "caterer")) {
+		return "find_vendor"
+	}
+	if strings.Contains(message, "quote") || strings.Contains(message, "price") || strings.Contains(message, "cost") {
+		return "get_quote"
+	}
+	if strings.Contains(message, "book") || strings.Contains(message, "hire") {
+		return "book_service"
+	}
+	if strings.Contains(message, "recommend") || strings.Contains(message, "suggest") {
+		return "get_recommendation"
+	}
+	if strings.Contains(message, "thank") {
+		return "thanks"
+	}
+	if strings.Contains(message, "hi") || strings.Contains(message, "hello") || strings.Contains(message, "hey") {
+		return "greeting"
+	}
+
+	return "general_question"
+}
+
+func generateResponse(intent string, currentState string) (string, []gin.H) {
+	switch intent {
+	case "create_event_wedding":
+		return "Great! Let's plan your wedding. 💍 When is the big day? You can give me an exact date or just a general timeframe.",
+			[]gin.H{
+				{"title": "Next month", "payload": "date:next_month"},
+				{"title": "In 6 months", "payload": "date:6_months"},
+				{"title": "Next year", "payload": "date:next_year"},
+			}
+
+	case "create_event_birthday":
+		return "Awesome! Planning a birthday party. 🎂 How many guests are you expecting?",
+			[]gin.H{
+				{"title": "10-20 guests", "payload": "guests:15"},
+				{"title": "20-50 guests", "payload": "guests:35"},
+				{"title": "50+ guests", "payload": "guests:75"},
+			}
+
+	case "find_vendor":
+		return "I can help you find the perfect vendor! What type of service are you looking for?",
+			[]gin.H{
+				{"title": "Photographer", "payload": "vendor:photographer"},
+				{"title": "Caterer", "payload": "vendor:caterer"},
+				{"title": "Decorator", "payload": "vendor:decorator"},
+				{"title": "DJ/Entertainment", "payload": "vendor:dj"},
+			}
+
+	case "get_quote":
+		return "I'd be happy to help you get pricing estimates. What service are you interested in?",
+			nil
+
+	case "book_service":
+		return "Ready to book! To help you with booking, I'll need a few details. Which vendor or service are you interested in?",
+			nil
+
+	case "get_recommendation":
+		return "I can recommend the best vendors for your event! What type of event are you planning?",
+			[]gin.H{
+				{"title": "Wedding", "payload": "event:wedding"},
+				{"title": "Birthday Party", "payload": "event:birthday"},
+				{"title": "Corporate Event", "payload": "event:corporate"},
+				{"title": "Other", "payload": "event:other"},
+			}
+
+	case "thanks":
+		return "You're welcome! Is there anything else I can help you with? 😊",
+			[]gin.H{
+				{"title": "Continue planning", "payload": "continue"},
+				{"title": "That's all for now", "payload": "end"},
+			}
+
+	case "greeting":
+		return "Hello! Welcome back! How can I assist you with your event planning today?",
+			nil
+
+	default:
+		return "I understand. Let me help you with that. Could you provide a bit more detail about what you're looking for?",
+			nil
+	}
+}
+
+func determineNextState(intent string, currentState string) string {
+	switch intent {
+	case "create_event_wedding", "create_event_birthday":
+		return "gathering_info"
+	case "find_vendor":
+		return "recommending"
+	case "book_service":
+		return "booking"
+	case "get_quote":
+		return "recommending"
+	case "thanks":
+		return "completed"
+	default:
+		return currentState
+	}
+}
 
 func (app *App) getPartnerMatches(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) createPartnership(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
