@@ -22,6 +22,7 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	"github.com/BillyRonksGlobal/vendorplatform/api/notifications"
 	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
@@ -31,6 +32,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/notification"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
@@ -257,6 +259,23 @@ func (app *App) setupRouter() {
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
+	// Notification service configuration
+	notificationConfig := &notification.Config{
+		SMTPHost:            getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:            587,
+		SMTPUser:            getEnv("SMTP_USER", ""),
+		SMTPPassword:        getEnv("SMTP_PASSWORD", ""),
+		FromEmail:           getEnv("FROM_EMAIL", "noreply@vendorplatform.com"),
+		FromName:            getEnv("FROM_NAME", "VendorPlatform"),
+		TermiiAPIKey:        getEnv("TERMII_API_KEY", ""),
+		TermiiSender:        getEnv("TERMII_SENDER", "VendorPlatform"),
+		FirebaseCredentials: getEnv("FIREBASE_CREDENTIALS", ""),
+		OneSignalAppID:      getEnv("ONESIGNAL_APP_ID", ""),
+		OneSignalAPIKey:     getEnv("ONESIGNAL_API_KEY", ""),
+		TemplateDir:         getEnv("TEMPLATE_DIR", "./templates/emails"),
+	}
+	notificationService := notification.NewService(app.db, app.cache, notificationConfig)
+
 	paymentConfig := &payment.Config{
 		PaystackSecretKey:    getEnv("PAYSTACK_SECRET_KEY", ""),
 		PaystackPublicKey:    getEnv("PAYSTACK_PUBLIC_KEY", ""),
@@ -276,6 +295,7 @@ func (app *App) setupRouter() {
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 	paymentHandler := payments.NewHandler(paymentService, app.logger)
+	notificationHandler := notifications.NewHandler(notificationService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -296,6 +316,9 @@ func (app *App) setupRouter() {
 
 		// Payment Processing & Escrow
 		paymentHandler.RegisterRoutes(v1)
+
+		// Notification Management
+		notificationHandler.RegisterRoutes(v1)
 
 		// LifeOS - Life Event Orchestration
 		lifeosHandler.RegisterRoutes(v1)
