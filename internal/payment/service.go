@@ -875,7 +875,7 @@ func (s *Service) GetTransactionByReference(ctx context.Context, reference strin
 	
 	json.Unmarshal(metadataJSON, &txn.Metadata)
 	json.Unmarshal(providerDataJSON, &txn.ProviderData)
-	
+
 	return &txn, nil
 }
 
