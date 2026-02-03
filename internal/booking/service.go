@@ -108,12 +108,8 @@ type ListBookingsFilter struct {
 	Offset    int
 }
 
-// Service handles booking business logic
-	ErrBookingNotFound    = errors.New("booking not found")
-	ErrInvalidBookingData = errors.New("invalid booking data")
-	ErrBookingExists      = errors.New("booking already exists")
-	ErrInvalidStatus      = errors.New("invalid status transition")
-	ErrUnauthorized       = errors.New("unauthorized")
+var (
+	ErrInvalidStatus = errors.New("invalid status transition")
 )
 
 // Service handles booking-related operations
