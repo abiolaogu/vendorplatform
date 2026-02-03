@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -118,11 +119,28 @@ func DefaultConfig() *Config {
 	}
 }
 
+// NotificationSender interface for sending notifications
+type NotificationSender interface {
+	Send(ctx context.Context, req SendNotificationRequest) error
+}
+
+// SendNotificationRequest matches the notification service's SendRequest
+type SendNotificationRequest struct {
+	UserID   uuid.UUID
+	Type     string
+	Title    string
+	Body     string
+	Data     map[string]interface{}
+	Priority string
+	Channels []string
+}
+
 // Service handles authentication
 type Service struct {
-	db     *pgxpool.Pool
-	cache  *redis.Client
-	config *Config
+	db           *pgxpool.Pool
+	cache        *redis.Client
+	config       *Config
+	notification NotificationSender
 }
 
 // NewService creates a new auth service
@@ -135,6 +153,11 @@ func NewService(db *pgxpool.Pool, cache *redis.Client, config *Config) *Service 
 		cache:  cache,
 		config: config,
 	}
+}
+
+// SetNotificationService sets the notification service for sending emails
+func (s *Service) SetNotificationService(notificationService NotificationSender) {
+	s.notification = notificationService
 }
 
 // =============================================================================
@@ -207,8 +230,10 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest) (*User, err
 		// Log but don't fail - user is created
 		fmt.Printf("failed to generate verification token: %v\n", err)
 	} else {
-		// TODO: Send verification email
-		fmt.Printf("Verification token for %s: %s\n", user.Email, verificationToken)
+		// Send verification email
+		if err := s.sendVerificationEmail(ctx, user, verificationToken); err != nil {
+			fmt.Printf("failed to send verification email: %v\n", err)
+		}
 	}
 
 	return user, nil
@@ -500,7 +525,20 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) (strin
 		return "", err
 	}
 
-	// TODO: Send password reset email
+	// Get user info for email
+	var user User
+	err = s.db.QueryRow(ctx, "SELECT id, email, first_name, last_name FROM users WHERE id = $1", userID).Scan(
+		&user.ID, &user.Email, &user.FirstName, &user.LastName,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	// Send password reset email
+	if err := s.sendPasswordResetEmail(ctx, &user, token); err != nil {
+		fmt.Printf("failed to send password reset email: %v\n", err)
+	}
+
 	return token, nil
 }
 
@@ -654,4 +692,72 @@ func GetRoleFromContext(c *gin.Context) (UserRole, error) {
 		return "", errors.New("role not found in context")
 	}
 	return role.(UserRole), nil
+}
+
+// =============================================================================
+// EMAIL NOTIFICATIONS
+// =============================================================================
+
+// sendVerificationEmail sends an email verification link to the user
+func (s *Service) sendVerificationEmail(ctx context.Context, user *User, token string) error {
+	if s.notification == nil {
+		return errors.New("notification service not configured")
+	}
+
+	// Build verification URL (this would be the frontend URL)
+	baseURL := getEnv("FRONTEND_URL", "https://vendorplatform.com")
+	verificationURL := fmt.Sprintf("%s/verify-email?token=%s", baseURL, token)
+
+	// Create notification request
+	req := SendNotificationRequest{
+		UserID:   user.ID,
+		Type:     "email_verification",
+		Title:    "Verify Your Email Address",
+		Body:     "Welcome to VendorPlatform! Please verify your email address to get started.",
+		Data: map[string]interface{}{
+			"FirstName":        user.FirstName,
+			"VerificationURL":  verificationURL,
+			"VerificationCode": token[:8], // Show first 8 chars as code
+		},
+		Priority: "high",
+		Channels: []string{"email"},
+	}
+
+	return s.notification.Send(ctx, req)
+}
+
+// sendPasswordResetEmail sends a password reset link to the user
+func (s *Service) sendPasswordResetEmail(ctx context.Context, user *User, token string) error {
+	if s.notification == nil {
+		return errors.New("notification service not configured")
+	}
+
+	// Build reset URL (this would be the frontend URL)
+	baseURL := getEnv("FRONTEND_URL", "https://vendorplatform.com")
+	resetURL := fmt.Sprintf("%s/reset-password?token=%s", baseURL, token)
+
+	// Create notification request
+	req := SendNotificationRequest{
+		UserID: user.ID,
+		Type:   "password_reset",
+		Title:  "Reset Your Password",
+		Body:   "We received a request to reset your password. Click the link to create a new password.",
+		Data: map[string]interface{}{
+			"FirstName": user.FirstName,
+			"ResetURL":  resetURL,
+			"ResetCode": token[:8], // Show first 8 chars as code
+		},
+		Priority: "high",
+		Channels: []string{"email"},
+	}
+
+	return s.notification.Send(ctx, req)
+}
+
+// Helper to get environment variable (duplicated for package independence)
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/notification"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
@@ -240,6 +241,22 @@ func (app *App) setupRouter() {
 	router.GET("/health", app.healthCheck)
 	router.GET("/ready", app.readinessCheck)
 
+	// Initialize notification service
+	notificationConfig := &notification.Config{
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     587,
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		FromEmail:    getEnv("FROM_EMAIL", "noreply@vendorplatform.com"),
+		FromName:     getEnv("FROM_NAME", "VendorPlatform"),
+		TermiiAPIKey: getEnv("TERMII_API_KEY", ""),
+		TermiiSender: getEnv("TERMII_SENDER", "VendorPlatform"),
+		OneSignalAppID:  getEnv("ONESIGNAL_APP_ID", ""),
+		OneSignalAPIKey: getEnv("ONESIGNAL_API_KEY", ""),
+		TemplateDir:     "templates/email",
+	}
+	notificationService := notification.NewService(app.db, app.cache, notificationConfig)
+
 	// Initialize services
 	authConfig := &auth.Config{
 		JWTSecret:          getEnv("JWT_SECRET", "change-me-in-production-please"),
@@ -250,6 +267,9 @@ func (app *App) setupRouter() {
 		VerificationExpiry: 24 * time.Hour,
 	}
 	authService := auth.NewService(app.db, app.cache, authConfig)
+	// Wire notification service to auth service for email sending via adapter
+	notificationAdapter := auth.NewNotificationAdapter(notificationService)
+	authService.SetNotificationService(notificationAdapter)
 	vendorService := vendor.NewService(app.db, app.cache)
 	serviceManager := service.NewServiceManager(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
