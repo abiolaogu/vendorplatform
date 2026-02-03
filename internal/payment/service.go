@@ -878,3 +878,4 @@ func (s *Service) GetTransactionByReference(ctx context.Context, reference strin
 
 	return &txn, nil
 }
+
