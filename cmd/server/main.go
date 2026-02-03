@@ -22,6 +22,7 @@ import (
 
 	apiauth "github.com/BillyRonksGlobal/vendorplatform/api/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/api/bookings"
+	eventgptAPI "github.com/BillyRonksGlobal/vendorplatform/api/eventgpt"
 	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
@@ -29,6 +30,7 @@ import (
 	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/eventgpt"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
@@ -267,6 +269,7 @@ func (app *App) setupRouter() {
 	serviceManager := service.NewServiceManager(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
 	lifeosService := lifeos.NewService(app.db, app.cache)
+	eventgptService := eventgpt.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
@@ -287,9 +290,9 @@ func (app *App) setupRouter() {
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
+	eventgptHandler := eventgptAPI.NewHandler(eventgptService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
-	paymentHandler := payments.NewHandler(paymentService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -318,13 +321,7 @@ func (app *App) setupRouter() {
 		lifeosHandler.RegisterRoutes(v1)
 
 		// EventGPT - Conversational AI Planner
-		eventgpt := v1.Group("/eventgpt")
-		{
-			eventgpt.POST("/conversations", app.startConversation)
-			eventgpt.POST("/conversations/:id/messages", app.sendMessage)
-			eventgpt.GET("/conversations/:id", app.getConversation)
-			eventgpt.DELETE("/conversations/:id", app.endConversation)
-		}
+		eventgptHandler.RegisterRoutes(v1)
 
 		// VendorNet - B2B Partnership Network
 		vendornet := v1.Group("/vendornet")
@@ -434,11 +431,6 @@ func (app *App) readinessCheck(c *gin.Context) {
 }
 
 // Placeholder handlers (to be implemented with actual logic)
-func (app *App) startConversation(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) sendMessage(c *gin.Context)           { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) endConversation(c *gin.Context)       { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-
 func (app *App) getPartnerMatches(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) createPartnership(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 func (app *App) getPartnership(c *gin.Context)        { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
