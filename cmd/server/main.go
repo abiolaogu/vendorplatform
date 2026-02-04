@@ -25,6 +25,7 @@ import (
 	eventgptAPI "github.com/BillyRonksGlobal/vendorplatform/api/eventgpt"
 	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
+	searchAPI "github.com/BillyRonksGlobal/vendorplatform/api/search"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	vendornetAPI "github.com/BillyRonksGlobal/vendorplatform/api/vendornet"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
@@ -37,6 +38,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/internal/notification"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/payment"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/search"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendornet"
@@ -45,10 +47,11 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Port        string
-	DatabaseURL string
-	RedisURL    string
-	Environment string
+	Port              string
+	DatabaseURL       string
+	RedisURL          string
+	ElasticsearchURL  string
+	Environment       string
 }
 
 // App holds the application dependencies
@@ -138,10 +141,11 @@ func main() {
 
 func loadConfig() *Config {
 	return &Config{
-		Port:        getEnv("PORT", "8080"),
-		DatabaseURL: getEnv("DATABASE_URL", "postgres://localhost:5432/vendorplatform"),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
-		Environment: getEnv("ENV", "development"),
+		Port:             getEnv("PORT", "8080"),
+		DatabaseURL:      getEnv("DATABASE_URL", "postgres://localhost:5432/vendorplatform"),
+		RedisURL:         getEnv("REDIS_URL", "redis://localhost:6379"),
+		ElasticsearchURL: getEnv("ELASTICSEARCH_URL", "http://localhost:9200"),
+		Environment:      getEnv("ENV", "development"),
 	}
 }
 
@@ -305,6 +309,14 @@ func (app *App) setupRouter() {
 	}
 	eventgptService := eventgpt.NewService(app.db, app.cache, eventgptConfig, app.logger)
 
+	// Initialize Search service
+	searchConfig := &search.Config{
+		ElasticsearchURL: app.config.ElasticsearchURL,
+		IndexPrefix:      getEnv("SEARCH_INDEX_PREFIX", "vendorplatform_"),
+		CacheTTL:         5 * time.Minute,
+	}
+	searchService := search.NewService(app.db, app.cache, searchConfig)
+
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	paymentHandler := payments.NewHandler(paymentService, app.logger)
@@ -315,6 +327,7 @@ func (app *App) setupRouter() {
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 	eventgptHandler := eventgptAPI.NewHandler(eventgptService, app.logger)
+	searchHandler := searchAPI.NewHandler(searchService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -347,6 +360,9 @@ func (app *App) setupRouter() {
 
 		// VendorNet - B2B Partnership Network
 		vendornetHandler.RegisterRoutes(v1)
+
+		// Search - Full-text search with Elasticsearch
+		searchHandler.RegisterRoutes(v1)
 
 		// HomeRescue - Emergency Services
 		homerescue := v1.Group("/homerescue")
