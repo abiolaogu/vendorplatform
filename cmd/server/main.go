@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
+	vendornetAPI "github.com/BillyRonksGlobal/vendorplatform/api/vendornet"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/homerescue"
@@ -287,9 +289,9 @@ func (app *App) setupRouter() {
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
+	vendornetHandler := vendornetAPI.NewHandler(app.db, app.cache, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
-	paymentHandler := payments.NewHandler(paymentService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -327,15 +329,7 @@ func (app *App) setupRouter() {
 		}
 
 		// VendorNet - B2B Partnership Network
-		vendornet := v1.Group("/vendornet")
-		{
-			vendornet.GET("/partners/matches", app.getPartnerMatches)
-			vendornet.POST("/partnerships", app.createPartnership)
-			vendornet.GET("/partnerships/:id", app.getPartnership)
-			vendornet.POST("/referrals", app.createReferral)
-			vendornet.PUT("/referrals/:id/status", app.updateReferralStatus)
-			vendornet.GET("/analytics", app.getNetworkAnalytics)
-		}
+		vendornetHandler.RegisterRoutes(v1)
 
 		// HomeRescue - Emergency Services
 		homerescue := v1.Group("/homerescue")
@@ -783,14 +777,8 @@ func determineNextState(intent string, currentState string) string {
 	}
 }
 
-func (app *App) getPartnerMatches(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) createPartnership(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getPartnership(c *gin.Context)        { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) createReferral(c *gin.Context)        { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) updateReferralStatus(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getNetworkAnalytics(c *gin.Context)   { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-
-// HomeRescue handlers are now implemented in api/homerescue/handlers.go
+// VendorNet handlers are implemented in api/vendornet/handlers.go
+// HomeRescue handlers are implemented in api/homerescue/handlers.go
 
 // getServiceRecommendations returns adjacent service recommendations based on context
 func (app *App) getServiceRecommendations(c *gin.Context) {
