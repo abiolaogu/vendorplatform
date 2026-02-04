@@ -1,17 +1,29 @@
-// Package homerescue provides emergency home services functionality
 // Package homerescue provides emergency home services business logic
 package homerescue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+)
+
+// Error definitions
+var (
+	ErrEmergencyNotFound      = errors.New("emergency not found")
+	ErrInvalidRequest         = errors.New("invalid request")
+	ErrNoTechniciansAvailable = errors.New("no technicians available")
+	ErrUnauthorized           = errors.New("unauthorized")
+	ErrInvalidUrgency         = errors.New("invalid urgency level")
+	ErrSLABreach              = errors.New("SLA deadline breached")
 )
 
 // Service handles HomeRescue business logic
@@ -30,59 +42,71 @@ func NewService(db *pgxpool.Pool, cache *redis.Client, logger *zap.Logger) *Serv
 	}
 }
 
-// EmergencyRequest represents an emergency service request
-type EmergencyRequest struct {
-	ID               uuid.UUID         `json:"id"`
-	UserID           uuid.UUID         `json:"user_id"`
-	Category         string            `json:"category"`
-	Subcategory      string            `json:"subcategory"`
-	Urgency          string            `json:"urgency"`
-	Title            string            `json:"title"`
-	Description      string            `json:"description"`
-	Location         EmergencyLocation `json:"location"`
-	Status           string            `json:"status"`
-	AssignedTechID   *uuid.UUID        `json:"assigned_tech_id,omitempty"`
-	ResponseDeadline time.Time         `json:"response_deadline"`
-	ArrivalDeadline  time.Time         `json:"arrival_deadline"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+// Emergency represents an emergency service request
+type Emergency struct {
+	ID                 uuid.UUID  `json:"id"`
+	UserID             uuid.UUID  `json:"user_id"`
+	Category           string     `json:"category"`
+	Subcategory        string     `json:"subcategory"`
+	Urgency            string     `json:"urgency"`
+	Title              string     `json:"title"`
+	Description        string     `json:"description"`
+	Address            string     `json:"address"`
+	Unit               string     `json:"unit,omitempty"`
+	City               string     `json:"city"`
+	State              string     `json:"state"`
+	PostalCode         string     `json:"postal_code"`
+	Latitude           float64    `json:"latitude"`
+	Longitude          float64    `json:"longitude"`
+	AccessInstructions string     `json:"access_instructions,omitempty"`
+	Status             string     `json:"status"`
+	AssignedVendorID   *uuid.UUID `json:"assigned_vendor_id,omitempty"`
+	AssignedTechID     *uuid.UUID `json:"assigned_tech_id,omitempty"`
+	TechLatitude       *float64   `json:"tech_latitude,omitempty"`
+	TechLongitude      *float64   `json:"tech_longitude,omitempty"`
+	EstimatedArrival   *time.Time `json:"estimated_arrival,omitempty"`
+	ActualArrival      *time.Time `json:"actual_arrival,omitempty"`
+	ResponseDeadline   time.Time  `json:"response_deadline"`
+	ArrivalDeadline    time.Time  `json:"arrival_deadline"`
+	EstimatedCost      *float64   `json:"estimated_cost,omitempty"`
+	FinalCost          *float64   `json:"final_cost,omitempty"`
+	WorkPerformed      string     `json:"work_performed,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 }
 
-// EmergencyLocation represents the location of an emergency
-type EmergencyLocation struct {
-	Address    string  `json:"address"`
-	Unit       string  `json:"unit,omitempty"`
-	City       string  `json:"city"`
-	State      string  `json:"state"`
-	PostalCode string  `json:"postal_code"`
-	Latitude   float64 `json:"latitude"`
-	Longitude  float64 `json:"longitude"`
-}
-
-// CreateEmergencyRequest represents the input for creating an emergency
+// CreateEmergencyRequest represents a request to create an emergency
 type CreateEmergencyRequest struct {
-	UserID          uuid.UUID         `json:"user_id"`
-	Category        string            `json:"category"`
-	Subcategory     string            `json:"subcategory"`
-	Urgency         string            `json:"urgency"`
-	Title           string            `json:"title"`
-	Description     string            `json:"description"`
-	Location        EmergencyLocation `json:"location"`
-	AccessInfo      string            `json:"access_instructions,omitempty"`
+	UserID             uuid.UUID `json:"user_id"`
+	Category           string    `json:"category"`
+	Subcategory        string    `json:"subcategory"`
+	Urgency            string    `json:"urgency"`
+	Title              string    `json:"title"`
+	Description        string    `json:"description"`
+	Address            string    `json:"address"`
+	Unit               string    `json:"unit,omitempty"`
+	City               string    `json:"city"`
+	State              string    `json:"state"`
+	PostalCode         string    `json:"postal_code"`
+	Latitude           float64   `json:"latitude"`
+	Longitude          float64   `json:"longitude"`
+	AccessInstructions string    `json:"access_instructions,omitempty"`
 }
 
-// EmergencyStatus represents the status of an emergency
+// EmergencyStatus represents the status information of an emergency
 type EmergencyStatus struct {
-	EmergencyID      uuid.UUID  `json:"emergency_id"`
-	Status           string     `json:"status"`
-	AssignedTechID   *uuid.UUID `json:"assigned_tech_id,omitempty"`
-	AssignedTechName string     `json:"assigned_tech_name,omitempty"`
-	AssignedTechPhone string    `json:"assigned_tech_phone,omitempty"`
-	ResponseDeadline time.Time  `json:"response_deadline"`
-	ArrivalDeadline  time.Time  `json:"arrival_deadline"`
-	EstimatedArrival *time.Time `json:"estimated_arrival,omitempty"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
+	EmergencyID       uuid.UUID  `json:"emergency_id"`
+	Status            string     `json:"status"`
+	AssignedTechID    *uuid.UUID `json:"assigned_tech_id,omitempty"`
+	AssignedTechName  string     `json:"assigned_tech_name,omitempty"`
+	AssignedTechPhone string     `json:"assigned_tech_phone,omitempty"`
+	ResponseDeadline  time.Time  `json:"response_deadline"`
+	ArrivalDeadline   time.Time  `json:"arrival_deadline"`
+	EstimatedArrival  *time.Time `json:"estimated_arrival,omitempty"`
+	SLAStatus         string     `json:"sla_status"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 // TechLocation represents a technician's current location
@@ -102,6 +126,7 @@ type EmergencyTracking struct {
 	EstimatedArrival  *time.Time    `json:"estimated_arrival,omitempty"`
 	DistanceRemaining *float64      `json:"distance_remaining_km,omitempty"`
 	TimeRemaining     *int          `json:"time_remaining_minutes,omitempty"`
+	SLAStatus         string        `json:"sla_status"`
 }
 
 // GeoPoint represents a geographic coordinate
@@ -110,29 +135,89 @@ type GeoPoint struct {
 	Longitude float64 `json:"longitude"`
 }
 
-// Response time SLAs in minutes based on urgency
-var responseSLAMinutes = map[string]int{
-	"critical":  30,
-	"urgent":    120,
-	"same_day":  360,
-	"scheduled": 1440,
+// TechnicianAvailability represents technician availability information
+type TechnicianAvailability struct {
+	TechID           uuid.UUID       `json:"tech_id"`
+	Category         string          `json:"category"`
+	IsAvailable      bool            `json:"is_available"`
+	CurrentJobs      int             `json:"current_jobs"`
+	MaxConcurrentJobs int            `json:"max_concurrent_jobs"`
+	Latitude         *float64        `json:"latitude,omitempty"`
+	Longitude        *float64        `json:"longitude,omitempty"`
+	AvailableSlots   json.RawMessage `json:"available_slots,omitempty"`
 }
 
-// CreateEmergency creates a new emergency request
-func (s *Service) CreateEmergency(ctx context.Context, req *CreateEmergencyRequest) (*EmergencyRequest, error) {
-	emergencyID := uuid.New()
-	now := time.Now()
+// SLAMetrics represents SLA compliance metrics
+type SLAMetrics struct {
+	EmergencyID          uuid.UUID  `json:"emergency_id"`
+	ResponseTimeSLA      int        `json:"response_time_sla_minutes"`
+	ActualResponseTime   *int       `json:"actual_response_time_minutes,omitempty"`
+	ArrivalTimeSLA       int        `json:"arrival_time_sla_minutes"`
+	ActualArrivalTime    *int       `json:"actual_arrival_time_minutes,omitempty"`
+	SLAStatus            string     `json:"sla_status"`
+	RefundPercentage     int        `json:"refund_percentage"`
+	RefundAmount         *float64   `json:"refund_amount,omitempty"`
+	RefundProcessed      bool       `json:"refund_processed"`
+}
 
-	// Calculate SLA deadlines based on urgency
-	slaMinutes, ok := responseSLAMinutes[req.Urgency]
-	if !ok {
-		slaMinutes = 120 // Default to urgent
+// Response time SLAs in minutes based on urgency
+var responseSLAMinutes = map[string]int{
+	"critical":  30,   // < 30 minutes
+	"urgent":    120,  // < 2 hours
+	"same_day":  360,  // < 6 hours
+	"scheduled": 1440, // < 24 hours
+}
+
+// Refund percentages for SLA breaches
+var slaRefundPercentages = map[string]int{
+	"critical":  100, // 100% refund if missed
+	"urgent":    50,  // 50% refund if missed
+	"same_day":  25,  // 25% discount if missed
+	"scheduled": 0,   // No refund
+}
+
+// =============================================================================
+// EMERGENCY CREATION AND MANAGEMENT
+// =============================================================================
+
+// CreateEmergency creates a new emergency request and starts technician matching
+func (s *Service) CreateEmergency(ctx context.Context, req *CreateEmergencyRequest) (*Emergency, error) {
+	// Validate request
+	if req.UserID == uuid.Nil || req.Category == "" || req.Title == "" {
+		return nil, ErrInvalidRequest
 	}
 
-	responseDeadline := now.Add(time.Duration(slaMinutes) * time.Minute)
-	arrivalDeadline := responseDeadline.Add(30 * time.Minute) // 30 min after response
+	// Validate urgency level
+	slaMinutes, ok := responseSLAMinutes[req.Urgency]
+	if !ok {
+		return nil, ErrInvalidUrgency
+	}
 
-	// Insert emergency into database
+	emergency := &Emergency{
+		ID:                 uuid.New(),
+		UserID:             req.UserID,
+		Category:           req.Category,
+		Subcategory:        req.Subcategory,
+		Urgency:            req.Urgency,
+		Title:              req.Title,
+		Description:        req.Description,
+		Address:            req.Address,
+		Unit:               req.Unit,
+		City:               req.City,
+		State:              req.State,
+		PostalCode:         req.PostalCode,
+		Latitude:           req.Latitude,
+		Longitude:          req.Longitude,
+		AccessInstructions: req.AccessInstructions,
+		Status:             "new",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
+	}
+
+	// Calculate SLA deadlines
+	emergency.ResponseDeadline = emergency.CreatedAt.Add(time.Duration(slaMinutes) * time.Minute)
+	emergency.ArrivalDeadline = emergency.ResponseDeadline.Add(30 * time.Minute)
+
 	query := `
 		INSERT INTO emergencies (
 			id, user_id, category, subcategory, urgency, title, description,
@@ -143,13 +228,12 @@ func (s *Service) CreateEmergency(ctx context.Context, req *CreateEmergencyReque
 	`
 
 	_, err := s.db.Exec(ctx, query,
-		emergencyID, req.UserID, req.Category, req.Subcategory, req.Urgency,
-		req.Title, req.Description,
-		req.Location.Address, req.Location.Unit, req.Location.City,
-		req.Location.State, req.Location.PostalCode,
-		req.Location.Latitude, req.Location.Longitude,
-		req.AccessInfo, "new", responseDeadline, arrivalDeadline,
-		now, now,
+		emergency.ID, emergency.UserID, emergency.Category, emergency.Subcategory,
+		emergency.Urgency, emergency.Title, emergency.Description, emergency.Address,
+		emergency.Unit, emergency.City, emergency.State, emergency.PostalCode,
+		emergency.Latitude, emergency.Longitude, emergency.AccessInstructions,
+		emergency.Status, emergency.ResponseDeadline, emergency.ArrivalDeadline,
+		emergency.CreatedAt, emergency.UpdatedAt,
 	)
 
 	if err != nil {
@@ -157,30 +241,60 @@ func (s *Service) CreateEmergency(ctx context.Context, req *CreateEmergencyReque
 		return nil, fmt.Errorf("failed to create emergency: %w", err)
 	}
 
+	// Initialize SLA metrics
+	if err := s.initializeSLAMetrics(ctx, emergency); err != nil {
+		s.logger.Error("Failed to initialize SLA metrics", zap.Error(err))
+	}
+
 	// Cache emergency for real-time updates
-	s.cacheEmergency(ctx, emergencyID, "new")
+	s.cacheEmergency(ctx, emergency.ID, "new")
 
 	s.logger.Info("Emergency created",
-		zap.String("emergency_id", emergencyID.String()),
-		zap.String("category", req.Category),
-		zap.String("urgency", req.Urgency),
+		zap.String("emergency_id", emergency.ID.String()),
+		zap.String("category", emergency.Category),
+		zap.String("urgency", emergency.Urgency),
 	)
 
-	return &EmergencyRequest{
-		ID:               emergencyID,
-		UserID:           req.UserID,
-		Category:         req.Category,
-		Subcategory:      req.Subcategory,
-		Urgency:          req.Urgency,
-		Title:            req.Title,
-		Description:      req.Description,
-		Location:         req.Location,
-		Status:           "new",
-		ResponseDeadline: responseDeadline,
-		ArrivalDeadline:  arrivalDeadline,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	}, nil
+	// Start async technician matching
+	go s.matchTechnician(context.Background(), emergency.ID)
+
+	return emergency, nil
+}
+
+// GetEmergency retrieves an emergency by ID
+func (s *Service) GetEmergency(ctx context.Context, id uuid.UUID) (*Emergency, error) {
+	query := `
+		SELECT id, user_id, category, subcategory, urgency, title, description,
+		       address, unit, city, state, postal_code, latitude, longitude,
+		       access_instructions, status, assigned_vendor_id, assigned_tech_id,
+		       tech_latitude, tech_longitude, estimated_arrival, actual_arrival,
+		       response_deadline, arrival_deadline, estimated_cost, final_cost,
+		       work_performed, created_at, updated_at, completed_at
+		FROM emergencies WHERE id = $1
+	`
+
+	emergency := &Emergency{}
+	err := s.db.QueryRow(ctx, query, id).Scan(
+		&emergency.ID, &emergency.UserID, &emergency.Category, &emergency.Subcategory,
+		&emergency.Urgency, &emergency.Title, &emergency.Description, &emergency.Address,
+		&emergency.Unit, &emergency.City, &emergency.State, &emergency.PostalCode,
+		&emergency.Latitude, &emergency.Longitude, &emergency.AccessInstructions,
+		&emergency.Status, &emergency.AssignedVendorID, &emergency.AssignedTechID,
+		&emergency.TechLatitude, &emergency.TechLongitude, &emergency.EstimatedArrival,
+		&emergency.ActualArrival, &emergency.ResponseDeadline, &emergency.ArrivalDeadline,
+		&emergency.EstimatedCost, &emergency.FinalCost, &emergency.WorkPerformed,
+		&emergency.CreatedAt, &emergency.UpdatedAt, &emergency.CompletedAt,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, ErrEmergencyNotFound
+	}
+	if err != nil {
+		s.logger.Error("Failed to get emergency", zap.Error(err))
+		return nil, fmt.Errorf("failed to get emergency: %w", err)
+	}
+
+	return emergency, nil
 }
 
 // GetEmergencyStatus retrieves the current status of an emergency
@@ -199,21 +313,17 @@ func (s *Service) GetEmergencyStatus(ctx context.Context, emergencyID uuid.UUID)
 	var estimatedArrival *time.Time
 
 	err := s.db.QueryRow(ctx, query, emergencyID).Scan(
-		&status.EmergencyID,
-		&status.Status,
-		&status.AssignedTechID,
-		&status.ResponseDeadline,
-		&status.ArrivalDeadline,
-		&estimatedArrival,
-		&status.CreatedAt,
-		&status.UpdatedAt,
-		&techName,
-		&techPhone,
+		&status.EmergencyID, &status.Status, &status.AssignedTechID,
+		&status.ResponseDeadline, &status.ArrivalDeadline, &estimatedArrival,
+		&status.CreatedAt, &status.UpdatedAt, &techName, &techPhone,
 	)
 
+	if err == pgx.ErrNoRows {
+		return nil, ErrEmergencyNotFound
+	}
 	if err != nil {
 		s.logger.Error("Failed to get emergency status", zap.Error(err))
-		return nil, fmt.Errorf("emergency not found")
+		return nil, fmt.Errorf("failed to get emergency status: %w", err)
 	}
 
 	if techName != nil {
@@ -224,233 +334,181 @@ func (s *Service) GetEmergencyStatus(ctx context.Context, emergencyID uuid.UUID)
 	}
 	status.EstimatedArrival = estimatedArrival
 
+	// Calculate SLA status
+	status.SLAStatus = s.calculateSLAStatus(status.ResponseDeadline, status.ArrivalDeadline, status.Status)
+
 	return &status, nil
 }
 
-// GetEmergencyTracking retrieves real-time tracking information
-func (s *Service) GetEmergencyTracking(ctx context.Context, emergencyID uuid.UUID) (*EmergencyTracking, error) {
-	// Get emergency basic info
+// =============================================================================
+// TECHNICIAN MATCHING AND DISPATCH
+// =============================================================================
+
+// matchTechnician finds and assigns the nearest available technician
+func (s *Service) matchTechnician(ctx context.Context, emergencyID uuid.UUID) {
+	s.logger.Info("Starting technician matching", zap.String("emergency_id", emergencyID.String()))
+
+	// Update status to searching
+	_, err := s.db.Exec(ctx, `UPDATE emergencies SET status = 'searching', updated_at = NOW() WHERE id = $1`, emergencyID)
+	if err != nil {
+		s.logger.Error("Failed to update emergency status to searching", zap.Error(err))
+		return
+	}
+
+	// Get emergency details
+	emergency, err := s.GetEmergency(ctx, emergencyID)
+	if err != nil {
+		s.logger.Error("Failed to get emergency for matching", zap.Error(err))
+		return
+	}
+
+	// Find available technicians
+	technicians, err := s.findAvailableTechnicians(ctx, emergency.Category, emergency.Latitude, emergency.Longitude, 50.0)
+	if err != nil || len(technicians) == 0 {
+		s.logger.Warn("No technicians available",
+			zap.String("category", emergency.Category),
+			zap.Error(err),
+		)
+		s.db.Exec(ctx, `UPDATE emergencies SET status = 'no_technicians_available', updated_at = NOW() WHERE id = $1`, emergencyID)
+		return
+	}
+
+	s.logger.Info("Found available technicians",
+		zap.String("emergency_id", emergencyID.String()),
+		zap.Int("count", len(technicians)),
+	)
+
+	// Notify technicians in order of proximity (cascade notification)
+	for i, tech := range technicians {
+		if i >= 5 { // Notify max 5 technicians
+			break
+		}
+
+		s.logger.Info("Notifying technician",
+			zap.String("emergency_id", emergencyID.String()),
+			zap.String("tech_id", tech.TechID.String()),
+			zap.Int("rank", i+1),
+		)
+
+		// In production, this would send push notification
+		// For now, we'll mark the emergency as notified
+		s.cache.SAdd(ctx, fmt.Sprintf("emergency:notified:%s", emergencyID.String()), tech.TechID.String())
+	}
+
+	// Auto-assign to closest technician if critical
+	if emergency.Urgency == "critical" && len(technicians) > 0 {
+		closestTech := technicians[0]
+		s.logger.Info("Auto-assigning critical emergency to closest tech",
+			zap.String("emergency_id", emergencyID.String()),
+			zap.String("tech_id", closestTech.TechID.String()),
+		)
+
+		// Calculate ETA
+		distance := calculateDistance(
+			*closestTech.Latitude, *closestTech.Longitude,
+			emergency.Latitude, emergency.Longitude,
+		)
+		eta := time.Now().Add(time.Duration(distance/40.0*60) * time.Minute)
+
+		s.AcceptEmergency(ctx, emergencyID, closestTech.TechID, eta)
+	}
+}
+
+// findAvailableTechnicians finds technicians available for a category within radius
+func (s *Service) findAvailableTechnicians(ctx context.Context, category string, lat, lon, radiusKm float64) ([]TechnicianAvailability, error) {
 	query := `
-		SELECT e.status, e.assigned_tech_id, e.latitude, e.longitude, e.estimated_arrival
-		FROM emergencies e
-		WHERE e.id = $1
+		SELECT
+			ta.technician_id,
+			ta.category,
+			ta.is_available,
+			ta.current_concurrent_jobs,
+			ta.max_concurrent_jobs,
+			ta.last_known_latitude,
+			ta.last_known_longitude
+		FROM technician_availability ta
+		WHERE ta.category = $1
+		  AND ta.is_available = true
+		  AND ta.current_concurrent_jobs < ta.max_concurrent_jobs
+		  AND ta.last_known_latitude IS NOT NULL
+		  AND ta.last_known_longitude IS NOT NULL
+		ORDER BY (
+			6371 * acos(
+				cos(radians($2)) * cos(radians(ta.last_known_latitude)) *
+				cos(radians(ta.last_known_longitude) - radians($3)) +
+				sin(radians($2)) * sin(radians(ta.last_known_latitude))
+			)
+		) ASC
+		LIMIT 10
 	`
 
-	var status string
-	var techID *uuid.UUID
-	var custLat, custLon float64
-	var estimatedArrival *time.Time
-
-	err := s.db.QueryRow(ctx, query, emergencyID).Scan(&status, &techID, &custLat, &custLon, &estimatedArrival)
+	rows, err := s.db.Query(ctx, query, category, lat, lon)
 	if err != nil {
-		return nil, fmt.Errorf("emergency not found")
+		return nil, fmt.Errorf("failed to find technicians: %w", err)
 	}
+	defer rows.Close()
 
-	tracking := &EmergencyTracking{
-		EmergencyID:      emergencyID,
-		Status:           status,
-		CustomerLocation: &GeoPoint{Latitude: custLat, Longitude: custLon},
-		EstimatedArrival: estimatedArrival,
-	}
+	var technicians []TechnicianAvailability
+	for rows.Next() {
+		var tech TechnicianAvailability
+		err := rows.Scan(
+			&tech.TechID, &tech.Category, &tech.IsAvailable,
+			&tech.CurrentJobs, &tech.MaxConcurrentJobs,
+			&tech.Latitude, &tech.Longitude,
+		)
+		if err != nil {
+			s.logger.Error("Failed to scan technician", zap.Error(err))
+			continue
+		}
 
-	// If tech is assigned and en route, get their real-time location from cache
-	if techID != nil && (status == "en_route" || status == "assigned") {
-		techLoc, err := s.getTechLocation(ctx, *techID)
-		if err == nil && techLoc != nil {
-			tracking.TechLocation = techLoc
-
-			// Calculate distance and time remaining
-			distance := s.calculateDistance(
-				techLoc.Latitude, techLoc.Longitude,
-				custLat, custLon,
-			)
-			tracking.DistanceRemaining = &distance
-
-			// Rough estimate: 40 km/h average in city
-			timeMinutes := int((distance / 40.0) * 60)
-			tracking.TimeRemaining = &timeMinutes
+		// Filter by radius
+		if tech.Latitude != nil && tech.Longitude != nil {
+			distance := calculateDistance(*tech.Latitude, *tech.Longitude, lat, lon)
+			if distance <= radiusKm {
+				technicians = append(technicians, tech)
+			}
 		}
 	}
 
-	return tracking, nil
+	return technicians, nil
 }
 
-// UpdateTechLocation updates a technician's current location
-func (s *Service) UpdateTechLocation(ctx context.Context, techID uuid.UUID, lat, lon float64) error {
-	// Store in Redis with 5-minute expiry (real-time data)
-	key := fmt.Sprintf("tech:location:%s", techID.String())
-	location := map[string]interface{}{
-		"latitude":  lat,
-		"longitude": lon,
-		"timestamp": time.Now().Unix(),
-	}
+// =============================================================================
+// EMERGENCY LIFECYCLE MANAGEMENT
+// =============================================================================
 
-	err := s.cache.HSet(ctx, key, location).Err()
-	if err != nil {
-		return fmt.Errorf("failed to update tech location: %w", err)
-	}
-
-	// Set expiry
-	s.cache.Expire(ctx, key, 5*time.Minute)
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
-)
-
-var (
-	ErrEmergencyNotFound  = errors.New("emergency not found")
-	ErrInvalidRequest     = errors.New("invalid request")
-	ErrNoTechniciansAvailable = errors.New("no technicians available")
-	ErrUnauthorized       = errors.New("unauthorized")
-)
-
-// Service handles emergency service operations
-type Service struct {
-	db    *pgxpool.Pool
-	cache *redis.Client
-}
-
-// NewService creates a new emergency service
-func NewService(db *pgxpool.Pool, cache *redis.Client) *Service {
-	return &Service{
-		db:    db,
-		cache: cache,
-	}
-}
-
-// Emergency represents an emergency service request
-type Emergency struct {
-	ID                 uuid.UUID  `json:"id"`
-	UserID             uuid.UUID  `json:"user_id"`
-	Category           string     `json:"category"`
-	Subcategory        string     `json:"subcategory"`
-	Urgency            string     `json:"urgency"`
-	Title              string     `json:"title"`
-	Description        string     `json:"description"`
-
-	// Location
-	Address            string     `json:"address"`
-	Latitude           float64    `json:"latitude"`
-	Longitude          float64    `json:"longitude"`
-	AccessInstructions string     `json:"access_instructions"`
-
-	// Status
-	Status             string     `json:"status"`
-
-	// Assignment
-	AssignedVendorID   *uuid.UUID `json:"assigned_vendor_id,omitempty"`
-	AssignedTechID     *uuid.UUID `json:"assigned_tech_id,omitempty"`
-
-	// Tracking
-	TechLatitude       *float64   `json:"tech_latitude,omitempty"`
-	TechLongitude      *float64   `json:"tech_longitude,omitempty"`
-	EstimatedArrival   *time.Time `json:"estimated_arrival,omitempty"`
-	ActualArrival      *time.Time `json:"actual_arrival,omitempty"`
-
-	// Pricing
-	EstimatedCost      *float64   `json:"estimated_cost,omitempty"`
-	FinalCost          *float64   `json:"final_cost,omitempty"`
-
-	// Timestamps
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	CompletedAt        *time.Time `json:"completed_at,omitempty"`
-}
-
-// CreateEmergencyRequest represents a request to create an emergency
-type CreateEmergencyRequest struct {
-	UserID             uuid.UUID `json:"user_id"`
-	Category           string    `json:"category"`
-	Subcategory        string    `json:"subcategory"`
-	Urgency            string    `json:"urgency"`
-	Title              string    `json:"title"`
-	Description        string    `json:"description"`
-	Address            string    `json:"address"`
-	Latitude           float64   `json:"latitude"`
-	Longitude          float64   `json:"longitude"`
-	AccessInstructions string    `json:"access_instructions"`
-}
-
-// CreateEmergency creates a new emergency request and starts technician matching
-func (s *Service) CreateEmergency(ctx context.Context, req *CreateEmergencyRequest) (*Emergency, error) {
-	if req.UserID == uuid.Nil || req.Category == "" || req.Title == "" {
-		return nil, ErrInvalidRequest
-	}
-
-	emergency := &Emergency{
-		ID:                 uuid.New(),
-		UserID:             req.UserID,
-		Category:           req.Category,
-		Subcategory:        req.Subcategory,
-		Urgency:            req.Urgency,
-		Title:              req.Title,
-		Description:        req.Description,
-		Address:            req.Address,
-		Latitude:           req.Latitude,
-		Longitude:          req.Longitude,
-		AccessInstructions: req.AccessInstructions,
-		Status:             "new",
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
-	}
-
+// AcceptEmergency marks an emergency as accepted by a technician
+func (s *Service) AcceptEmergency(ctx context.Context, emergencyID, techID uuid.UUID, estimatedArrival time.Time) error {
 	query := `
-		INSERT INTO emergencies (
-			id, user_id, category, subcategory, urgency,
-			title, description, address, latitude, longitude,
-			access_instructions, status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		RETURNING id, created_at
+		UPDATE emergencies
+		SET assigned_tech_id = $2, status = 'accepted', estimated_arrival = $3, updated_at = NOW()
+		WHERE id = $1 AND status IN ('new', 'searching')
 	`
 
-	err := s.db.QueryRow(ctx, query,
-		emergency.ID, emergency.UserID, emergency.Category, emergency.Subcategory,
-		emergency.Urgency, emergency.Title, emergency.Description, emergency.Address,
-		emergency.Latitude, emergency.Longitude, emergency.AccessInstructions,
-		emergency.Status, emergency.CreatedAt, emergency.UpdatedAt,
-	).Scan(&emergency.ID, &emergency.CreatedAt)
-
+	result, err := s.db.Exec(ctx, query, emergencyID, techID, estimatedArrival)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create emergency: %w", err)
+		s.logger.Error("Failed to accept emergency", zap.Error(err))
+		return fmt.Errorf("failed to accept emergency: %w", err)
 	}
 
-	// Start async technician matching
-	go s.matchTechnician(context.Background(), emergency.ID)
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("emergency not available for acceptance")
+	}
 
-	return emergency, nil
-}
+	// Update SLA metrics
+	s.updateSLAResponseTime(ctx, emergencyID)
 
-// GetEmergency retrieves an emergency by ID
-func (s *Service) GetEmergency(ctx context.Context, id uuid.UUID) (*Emergency, error) {
-	query := `
-		SELECT id, user_id, category, subcategory, urgency,
-		       title, description, address, latitude, longitude,
-		       access_instructions, status, assigned_vendor_id,
-		       assigned_tech_id, tech_latitude, tech_longitude,
-		       estimated_arrival, actual_arrival, estimated_cost,
-		       final_cost, created_at, updated_at, completed_at
-		FROM emergencies WHERE id = $1
-	`
+	// Update technician availability
+	s.incrementTechnicianJobs(ctx, techID)
 
-	emergency := &Emergency{}
-	err := s.db.QueryRow(ctx, query, id).Scan(
-		&emergency.ID, &emergency.UserID, &emergency.Category, &emergency.Subcategory,
-		&emergency.Urgency, &emergency.Title, &emergency.Description, &emergency.Address,
-		&emergency.Latitude, &emergency.Longitude, &emergency.AccessInstructions,
-		&emergency.Status, &emergency.AssignedVendorID, &emergency.AssignedTechID,
-		&emergency.TechLatitude, &emergency.TechLongitude, &emergency.EstimatedArrival,
-		&emergency.ActualArrival, &emergency.EstimatedCost, &emergency.FinalCost,
-		&emergency.CreatedAt, &emergency.UpdatedAt, &emergency.CompletedAt,
+	// Cache update
+	s.cacheEmergency(ctx, emergencyID, "accepted")
+
+	s.logger.Info("Emergency accepted",
+		zap.String("emergency_id", emergencyID.String()),
+		zap.String("tech_id", techID.String()),
 	)
 
-	if err == pgx.ErrNoRows {
-		return nil, ErrEmergencyNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get emergency: %w", err)
-	}
-
-	return emergency, nil
+	return nil
 }
 
 // UpdateTechnicianLocation updates the technician's GPS location
@@ -463,6 +521,7 @@ func (s *Service) UpdateTechnicianLocation(ctx context.Context, emergencyID uuid
 
 	result, err := s.db.Exec(ctx, query, emergencyID, lat, lon)
 	if err != nil {
+		s.logger.Error("Failed to update tech location", zap.Error(err))
 		return fmt.Errorf("failed to update location: %w", err)
 	}
 
@@ -470,99 +529,344 @@ func (s *Service) UpdateTechnicianLocation(ctx context.Context, emergencyID uuid
 		return ErrEmergencyNotFound
 	}
 
-	// Update estimated arrival based on distance
-	go s.calculateETA(context.Background(), emergencyID, lat, lon)
+	// Cache tech location in Redis for real-time tracking
+	emergency, err := s.GetEmergency(ctx, emergencyID)
+	if err == nil && emergency.AssignedTechID != nil {
+		s.cacheTechLocation(ctx, *emergency.AssignedTechID, lat, lon)
+	}
+
+	// Recalculate ETA
+	go s.recalculateETA(context.Background(), emergencyID, lat, lon)
 
 	return nil
 }
 
-// AcceptEmergency marks the emergency as accepted by a technician
-func (s *Service) AcceptEmergency(ctx context.Context, emergencyID, techID uuid.UUID) error {
-	query := `
-		UPDATE emergencies
-		SET assigned_tech_id = $2, status = 'accepted', updated_at = NOW()
-		WHERE id = $1 AND status IN ('new', 'searching')
-	`
-
-	result, err := s.db.Exec(ctx, query, emergencyID, techID)
-	if err != nil {
-		return fmt.Errorf("failed to accept emergency: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrEmergencyNotFound
-	}
-
-	return nil
-}
-
-// AcceptEmergency marks an emergency as accepted by a technician
-func (s *Service) AcceptEmergency(ctx context.Context, emergencyID, techID uuid.UUID, estimatedArrival time.Time) error {
-	query := `
-		UPDATE emergencies
-		SET assigned_tech_id = $1, status = $2, estimated_arrival = $3, updated_at = $4
-		WHERE id = $5 AND status IN ('new', 'searching')
-	`
-
-	result, err := s.db.Exec(ctx, query, techID, "accepted", estimatedArrival, time.Now(), emergencyID)
-	if err != nil {
-		return fmt.Errorf("failed to accept emergency: %w", err)
-	}
-
-	rowsAffected := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("emergency not available for acceptance")
-	}
-
-	// Update cache
-	s.cacheEmergency(ctx, emergencyID, "accepted")
-
-	s.logger.Info("Emergency accepted",
-		zap.String("emergency_id", emergencyID.String()),
-		zap.String("tech_id", techID.String()),
-	)
-
-	return nil
-}
-
-// CompleteEmergency marks an emergency as completed
-func (s *Service) CompleteEmergency(ctx context.Context, emergencyID, techID uuid.UUID, workNotes string) error {
+// CompleteEmergency marks the emergency as completed
+func (s *Service) CompleteEmergency(ctx context.Context, emergencyID, techID uuid.UUID, workNotes string, finalCost float64) error {
 	now := time.Now()
 
 	query := `
 		UPDATE emergencies
-		SET status = $1, work_performed = $2, completed_at = $3, updated_at = $4
-		WHERE id = $5 AND assigned_tech_id = $6 AND status NOT IN ('completed', 'cancelled')
+		SET status = 'completed', work_performed = $2, final_cost = $3,
+		    completed_at = $4, updated_at = $4
+		WHERE id = $1 AND assigned_tech_id = $5 AND status NOT IN ('completed', 'cancelled')
 	`
 
-	result, err := s.db.Exec(ctx, query, "completed", workNotes, now, now, emergencyID, techID)
+	result, err := s.db.Exec(ctx, query, emergencyID, workNotes, finalCost, now, techID)
 	if err != nil {
+		s.logger.Error("Failed to complete emergency", zap.Error(err))
 		return fmt.Errorf("failed to complete emergency: %w", err)
 	}
 
-	rowsAffected := result.RowsAffected()
-	if rowsAffected == 0 {
+	if result.RowsAffected() == 0 {
 		return fmt.Errorf("emergency not found or already completed")
 	}
 
-	// Update cache
+	// Update SLA metrics with completion time
+	s.updateSLAArrivalTime(ctx, emergencyID)
+
+	// Decrement technician jobs
+	s.decrementTechnicianJobs(ctx, techID)
+
+	// Process refund if SLA was breached
+	go s.processSLARefund(context.Background(), emergencyID)
+
+	// Cache update
 	s.cacheEmergency(ctx, emergencyID, "completed")
 
 	s.logger.Info("Emergency completed",
 		zap.String("emergency_id", emergencyID.String()),
 		zap.String("tech_id", techID.String()),
+		zap.Float64("final_cost", finalCost),
 	)
 
 	return nil
 }
 
-// Helper functions
+// =============================================================================
+// REAL-TIME TRACKING
+// =============================================================================
 
+// GetEmergencyTracking retrieves real-time tracking information
+func (s *Service) GetEmergencyTracking(ctx context.Context, emergencyID uuid.UUID) (*EmergencyTracking, error) {
+	// Get emergency basic info
+	query := `
+		SELECT e.status, e.assigned_tech_id, e.latitude, e.longitude,
+		       e.estimated_arrival, e.response_deadline, e.arrival_deadline
+		FROM emergencies e
+		WHERE e.id = $1
+	`
+
+	var status string
+	var techID *uuid.UUID
+	var custLat, custLon float64
+	var estimatedArrival *time.Time
+	var responseDeadline, arrivalDeadline time.Time
+
+	err := s.db.QueryRow(ctx, query, emergencyID).Scan(
+		&status, &techID, &custLat, &custLon, &estimatedArrival,
+		&responseDeadline, &arrivalDeadline,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, ErrEmergencyNotFound
+	}
+	if err != nil {
+		s.logger.Error("Failed to get tracking info", zap.Error(err))
+		return nil, fmt.Errorf("failed to get tracking: %w", err)
+	}
+
+	tracking := &EmergencyTracking{
+		EmergencyID:      emergencyID,
+		Status:           status,
+		CustomerLocation: &GeoPoint{Latitude: custLat, Longitude: custLon},
+		EstimatedArrival: estimatedArrival,
+		SLAStatus:        s.calculateSLAStatus(responseDeadline, arrivalDeadline, status),
+	}
+
+	// If tech is assigned and en route, get their real-time location from cache
+	if techID != nil && (status == "en_route" || status == "accepted" || status == "assigned") {
+		techLoc, err := s.getTechLocation(ctx, *techID)
+		if err == nil && techLoc != nil {
+			tracking.TechLocation = techLoc
+
+			// Calculate distance and time remaining
+			distance := calculateDistance(
+				techLoc.Latitude, techLoc.Longitude,
+				custLat, custLon,
+			)
+			tracking.DistanceRemaining = &distance
+
+			// Estimate time: 40 km/h average in city
+			timeMinutes := int((distance / 40.0) * 60)
+			tracking.TimeRemaining = &timeMinutes
+		}
+	}
+
+	return tracking, nil
+}
+
+// =============================================================================
+// SLA MONITORING AND REFUNDS
+// =============================================================================
+
+// initializeSLAMetrics creates initial SLA metrics record
+func (s *Service) initializeSLAMetrics(ctx context.Context, emergency *Emergency) error {
+	slaMinutes := responseSLAMinutes[emergency.Urgency]
+	arrivalSLA := slaMinutes + 30 // 30 minutes after response for arrival
+
+	query := `
+		INSERT INTO emergency_sla_metrics (
+			emergency_id, response_time_sla_minutes, arrival_time_sla_minutes,
+			sla_status, refund_percentage, refund_processed, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (emergency_id) DO NOTHING
+	`
+
+	_, err := s.db.Exec(ctx, query,
+		emergency.ID, slaMinutes, arrivalSLA, "pending",
+		slaRefundPercentages[emergency.Urgency], false, time.Now(),
+	)
+
+	return err
+}
+
+// updateSLAResponseTime records actual response time
+func (s *Service) updateSLAResponseTime(ctx context.Context, emergencyID uuid.UUID) {
+	query := `
+		UPDATE emergency_sla_metrics esm
+		SET actual_response_time_minutes = EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 60,
+		    updated_at = NOW()
+		FROM emergencies e
+		WHERE esm.emergency_id = $1 AND e.id = $1
+	`
+
+	_, err := s.db.Exec(ctx, query, emergencyID)
+	if err != nil {
+		s.logger.Error("Failed to update SLA response time", zap.Error(err))
+	}
+}
+
+// updateSLAArrivalTime records actual arrival time
+func (s *Service) updateSLAArrivalTime(ctx context.Context, emergencyID uuid.UUID) {
+	query := `
+		UPDATE emergency_sla_metrics esm
+		SET actual_arrival_time_minutes = EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 60,
+		    sla_status = CASE
+		        WHEN EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 60 <= response_time_sla_minutes THEN 'met'
+		        ELSE 'breached'
+		    END,
+		    updated_at = NOW()
+		FROM emergencies e
+		WHERE esm.emergency_id = $1 AND e.id = $1
+	`
+
+	_, err := s.db.Exec(ctx, query, emergencyID)
+	if err != nil {
+		s.logger.Error("Failed to update SLA arrival time", zap.Error(err))
+	}
+}
+
+// processSLARefund processes refund if SLA was breached
+func (s *Service) processSLARefund(ctx context.Context, emergencyID uuid.UUID) {
+	// Get SLA metrics
+	query := `
+		SELECT esm.sla_status, esm.refund_percentage, e.final_cost, e.urgency
+		FROM emergency_sla_metrics esm
+		JOIN emergencies e ON e.id = esm.emergency_id
+		WHERE esm.emergency_id = $1 AND esm.refund_processed = false
+	`
+
+	var slaStatus string
+	var refundPercentage int
+	var finalCost *float64
+	var urgency string
+
+	err := s.db.QueryRow(ctx, query, emergencyID).Scan(&slaStatus, &refundPercentage, &finalCost, &urgency)
+	if err != nil {
+		s.logger.Error("Failed to get SLA metrics for refund", zap.Error(err))
+		return
+	}
+
+	// If SLA was breached and we have a final cost
+	if slaStatus == "breached" && finalCost != nil && *finalCost > 0 {
+		refundAmount := (*finalCost) * float64(refundPercentage) / 100.0
+
+		s.logger.Info("Processing SLA refund",
+			zap.String("emergency_id", emergencyID.String()),
+			zap.String("urgency", urgency),
+			zap.Int("refund_percentage", refundPercentage),
+			zap.Float64("refund_amount", refundAmount),
+		)
+
+		// Update SLA metrics with refund amount
+		updateQuery := `
+			UPDATE emergency_sla_metrics
+			SET refund_amount = $2, refund_processed = true, updated_at = NOW()
+			WHERE emergency_id = $1
+		`
+
+		_, err := s.db.Exec(ctx, updateQuery, emergencyID, refundAmount)
+		if err != nil {
+			s.logger.Error("Failed to record refund", zap.Error(err))
+			return
+		}
+
+		// In production, this would trigger actual refund via payment service
+		s.logger.Info("SLA refund recorded",
+			zap.String("emergency_id", emergencyID.String()),
+			zap.Float64("amount", refundAmount),
+		)
+	}
+}
+
+// GetSLAMetrics retrieves SLA metrics for an emergency
+func (s *Service) GetSLAMetrics(ctx context.Context, emergencyID uuid.UUID) (*SLAMetrics, error) {
+	query := `
+		SELECT emergency_id, response_time_sla_minutes, actual_response_time_minutes,
+		       arrival_time_sla_minutes, actual_arrival_time_minutes, sla_status,
+		       refund_percentage, refund_amount, refund_processed
+		FROM emergency_sla_metrics
+		WHERE emergency_id = $1
+	`
+
+	metrics := &SLAMetrics{}
+	err := s.db.QueryRow(ctx, query, emergencyID).Scan(
+		&metrics.EmergencyID, &metrics.ResponseTimeSLA, &metrics.ActualResponseTime,
+		&metrics.ArrivalTimeSLA, &metrics.ActualArrivalTime, &metrics.SLAStatus,
+		&metrics.RefundPercentage, &metrics.RefundAmount, &metrics.RefundProcessed,
+	)
+
+	if err == pgx.ErrNoRows {
+		return nil, ErrEmergencyNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get SLA metrics: %w", err)
+	}
+
+	return metrics, nil
+}
+
+// =============================================================================
+// TECHNICIAN AVAILABILITY MANAGEMENT
+// =============================================================================
+
+// UpdateTechnicianAvailability updates technician availability status
+func (s *Service) UpdateTechnicianAvailability(ctx context.Context, techID uuid.UUID, isAvailable bool) error {
+	query := `
+		UPDATE technician_availability
+		SET is_available = $2, updated_at = NOW()
+		WHERE technician_id = $1
+	`
+
+	result, err := s.db.Exec(ctx, query, techID, isAvailable)
+	if err != nil {
+		return fmt.Errorf("failed to update availability: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("technician not found")
+	}
+
+	s.logger.Info("Technician availability updated",
+		zap.String("tech_id", techID.String()),
+		zap.Bool("is_available", isAvailable),
+	)
+
+	return nil
+}
+
+// incrementTechnicianJobs increments current job count
+func (s *Service) incrementTechnicianJobs(ctx context.Context, techID uuid.UUID) {
+	query := `
+		UPDATE technician_availability
+		SET current_concurrent_jobs = current_concurrent_jobs + 1, updated_at = NOW()
+		WHERE technician_id = $1
+	`
+
+	_, err := s.db.Exec(ctx, query, techID)
+	if err != nil {
+		s.logger.Error("Failed to increment tech jobs", zap.Error(err))
+	}
+}
+
+// decrementTechnicianJobs decrements current job count
+func (s *Service) decrementTechnicianJobs(ctx context.Context, techID uuid.UUID) {
+	query := `
+		UPDATE technician_availability
+		SET current_concurrent_jobs = GREATEST(current_concurrent_jobs - 1, 0), updated_at = NOW()
+		WHERE technician_id = $1
+	`
+
+	_, err := s.db.Exec(ctx, query, techID)
+	if err != nil {
+		s.logger.Error("Failed to decrement tech jobs", zap.Error(err))
+	}
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+// cacheEmergency stores emergency status in Redis
 func (s *Service) cacheEmergency(ctx context.Context, emergencyID uuid.UUID, status string) {
 	key := fmt.Sprintf("emergency:status:%s", emergencyID.String())
 	s.cache.Set(ctx, key, status, 30*time.Minute)
 }
 
+// cacheTechLocation stores technician location in Redis
+func (s *Service) cacheTechLocation(ctx context.Context, techID uuid.UUID, lat, lon float64) {
+	key := fmt.Sprintf("tech:location:%s", techID.String())
+	location := map[string]interface{}{
+		"latitude":  lat,
+		"longitude": lon,
+		"timestamp": time.Now().Unix(),
+	}
+
+	s.cache.HSet(ctx, key, location)
+	s.cache.Expire(ctx, key, 5*time.Minute)
+}
+
+// getTechLocation retrieves technician location from Redis
 func (s *Service) getTechLocation(ctx context.Context, techID uuid.UUID) (*TechLocation, error) {
 	key := fmt.Sprintf("tech:location:%s", techID.String())
 
@@ -586,117 +890,9 @@ func (s *Service) getTechLocation(ctx context.Context, techID uuid.UUID) (*TechL
 	}, nil
 }
 
-// calculateDistance calculates the distance between two points using Haversine formula
-func (s *Service) calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371 // Earth's radius in kilometers
-
-	dLat := (lat2 - lat1) * (3.14159265359 / 180.0)
-	dLon := (lon2 - lon1) * (3.14159265359 / 180.0)
-
-	a := 0.5 - 0.5*((dLat)*(dLat)) +
-		(1.0-((lat1)*(lat1)*(3.14159265359/180.0))) *
-		(1.0-((lat2)*(lat2)*(3.14159265359/180.0))) *
-		0.5 * (1.0 - ((dLon)*(dLon)))
-
-	// Simplified Haversine
-	return R * 2.0 * 3.14159265359 * (lat2 - lat1) / 360.0 * 111.0 // Rough approximation
-// CompleteEmergency marks the emergency as completed
-func (s *Service) CompleteEmergency(ctx context.Context, emergencyID uuid.UUID, finalCost float64) error {
-	now := time.Now()
-	query := `
-		UPDATE emergencies
-		SET status = 'completed', final_cost = $2, completed_at = $3, updated_at = NOW()
-		WHERE id = $1 AND status = 'in_progress'
-	`
-
-	result, err := s.db.Exec(ctx, query, emergencyID, finalCost, now)
-	if err != nil {
-		return fmt.Errorf("failed to complete emergency: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return ErrEmergencyNotFound
-	}
-
-	return nil
-}
-
-// GetTechnicianTracking returns real-time location data for tracking
-type TechnicianTracking struct {
-	TechnicianID     uuid.UUID  `json:"technician_id"`
-	TechnicianName   string     `json:"technician_name"`
-	CurrentLatitude  float64    `json:"current_latitude"`
-	CurrentLongitude float64    `json:"current_longitude"`
-	DestLatitude     float64    `json:"dest_latitude"`
-	DestLongitude    float64    `json:"dest_longitude"`
-	EstimatedArrival *time.Time `json:"estimated_arrival"`
-	DistanceKm       float64    `json:"distance_km"`
-	Status           string     `json:"status"`
-}
-
-func (s *Service) GetTechnicianTracking(ctx context.Context, emergencyID uuid.UUID) (*TechnicianTracking, error) {
-	query := `
-		SELECT
-			e.assigned_tech_id,
-			COALESCE(u.name, 'Technician') as tech_name,
-			e.tech_latitude,
-			e.tech_longitude,
-			e.latitude as dest_lat,
-			e.longitude as dest_lon,
-			e.estimated_arrival,
-			e.status
-		FROM emergencies e
-		LEFT JOIN users u ON u.id = e.assigned_tech_id
-		WHERE e.id = $1 AND e.assigned_tech_id IS NOT NULL
-	`
-
-	tracking := &TechnicianTracking{}
-	err := s.db.QueryRow(ctx, query, emergencyID).Scan(
-		&tracking.TechnicianID,
-		&tracking.TechnicianName,
-		&tracking.CurrentLatitude,
-		&tracking.CurrentLongitude,
-		&tracking.DestLatitude,
-		&tracking.DestLongitude,
-		&tracking.EstimatedArrival,
-		&tracking.Status,
-	)
-
-	if err == pgx.ErrNoRows {
-		return nil, ErrEmergencyNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tracking: %w", err)
-	}
-
-	// Calculate distance using Haversine formula
-	tracking.DistanceKm = calculateDistance(
-		tracking.CurrentLatitude, tracking.CurrentLongitude,
-		tracking.DestLatitude, tracking.DestLongitude,
-	)
-
-	return tracking, nil
-}
-
-// matchTechnician finds and assigns the nearest available technician
-func (s *Service) matchTechnician(ctx context.Context, emergencyID uuid.UUID) {
-	// Update status to searching
-	s.db.Exec(ctx, `UPDATE emergencies SET status = 'searching' WHERE id = $1`, emergencyID)
-
-	// In a real implementation, this would:
-	// 1. Query available technicians by category and location
-	// 2. Calculate distance to each technician
-	// 3. Send push notifications to nearest technicians
-	// 4. Wait for acceptance (with timeout and fallback)
-	// 5. Update emergency with assignment
-
-	// For now, this is a placeholder
-	time.Sleep(2 * time.Second) // Simulate matching delay
-}
-
-// calculateETA estimates arrival time based on distance and traffic
-func (s *Service) calculateETA(ctx context.Context, emergencyID uuid.UUID, techLat, techLon float64) {
-	// Get destination
+// recalculateETA recalculates estimated arrival time based on current location
+func (s *Service) recalculateETA(ctx context.Context, emergencyID uuid.UUID, techLat, techLon float64) {
+	// Get emergency location
 	var destLat, destLon float64
 	err := s.db.QueryRow(ctx, `SELECT latitude, longitude FROM emergencies WHERE id = $1`, emergencyID).
 		Scan(&destLat, &destLon)
@@ -707,15 +903,42 @@ func (s *Service) calculateETA(ctx context.Context, emergencyID uuid.UUID, techL
 	// Calculate distance
 	distanceKm := calculateDistance(techLat, techLon, destLat, destLon)
 
-	// Estimate time (assuming average speed of 40 km/h in city traffic)
+	// Estimate time (40 km/h average in city)
 	estimatedMinutes := int(distanceKm / 40.0 * 60)
 	eta := time.Now().Add(time.Duration(estimatedMinutes) * time.Minute)
 
-	// Update estimated arrival
-	s.db.Exec(ctx, `UPDATE emergencies SET estimated_arrival = $2 WHERE id = $1`, emergencyID, eta)
+	// Update ETA
+	s.db.Exec(ctx, `UPDATE emergencies SET estimated_arrival = $2, updated_at = NOW() WHERE id = $1`, emergencyID, eta)
 }
 
-// calculateDistance calculates the distance between two GPS coordinates using Haversine formula
+// calculateSLAStatus determines current SLA compliance status
+func (s *Service) calculateSLAStatus(responseDeadline, arrivalDeadline time.Time, status string) string {
+	now := time.Now()
+
+	if status == "completed" || status == "cancelled" {
+		return "final"
+	}
+
+	// Check if response deadline passed
+	if now.After(responseDeadline) && status == "new" || status == "searching" {
+		return "breached"
+	}
+
+	// Check if arrival deadline passed
+	if now.After(arrivalDeadline) && status != "completed" {
+		return "breached"
+	}
+
+	// Check if approaching deadline (within 20% of time)
+	responseBuffer := responseDeadline.Sub(now)
+	if responseBuffer < time.Duration(responseSLAMinutes["urgent"])*time.Minute/5 {
+		return "at_risk"
+	}
+
+	return "on_track"
+}
+
+// calculateDistance calculates distance between two GPS coordinates using Haversine formula
 func calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	const earthRadiusKm = 6371.0
 
@@ -725,57 +948,13 @@ func calculateDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	lat1Rad := toRadians(lat1)
 	lat2Rad := toRadians(lat2)
 
-	a := sin(dLat/2)*sin(dLat/2) +
-		sin(dLon/2)*sin(dLon/2)*cos(lat1Rad)*cos(lat2Rad)
-	c := 2 * atan2(sqrt(a), sqrt(1-a))
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Sin(dLon/2)*math.Sin(dLon/2)*math.Cos(lat1Rad)*math.Cos(lat2Rad)
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
 	return earthRadiusKm * c
 }
 
 func toRadians(deg float64) float64 {
-	return deg * (3.14159265358979323846 / 180)
-}
-
-func sin(x float64) float64 {
-	// Simple sine approximation
-	return x - (x*x*x)/6 + (x*x*x*x*x)/120
-}
-
-func cos(x float64) float64 {
-	return sin(x + 3.14159265358979323846/2)
-}
-
-func sqrt(x float64) float64 {
-	if x == 0 {
-		return 0
-	}
-	z := 1.0
-	for i := 0; i < 10; i++ {
-		z = z - (z*z-x)/(2*z)
-	}
-	return z
-}
-
-func atan2(y, x float64) float64 {
-	// Simplified atan2 approximation
-	if x > 0 {
-		return atan(y / x)
-	}
-	if x < 0 && y >= 0 {
-		return atan(y/x) + 3.14159265358979323846
-	}
-	if x < 0 && y < 0 {
-		return atan(y/x) - 3.14159265358979323846
-	}
-	if x == 0 && y > 0 {
-		return 3.14159265358979323846 / 2
-	}
-	if x == 0 && y < 0 {
-		return -3.14159265358979323846 / 2
-	}
-	return 0
-}
-
-func atan(x float64) float64 {
-	return x - (x*x*x)/3 + (x*x*x*x*x)/5 - (x*x*x*x*x*x*x)/7
+	return deg * math.Pi / 180.0
 }
