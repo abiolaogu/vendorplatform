@@ -25,6 +25,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/api/payments"
 	"github.com/BillyRonksGlobal/vendorplatform/api/reviews"
 	"github.com/BillyRonksGlobal/vendorplatform/api/vendors"
+	vendornetAPI "github.com/BillyRonksGlobal/vendorplatform/api/vendornet"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
@@ -36,6 +37,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/vendornet"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
 
@@ -285,31 +287,21 @@ func (app *App) setupRouter() {
 
 	vendorService := vendor.NewService(app.db, app.cache)
 	serviceManager := service.NewServiceManager(app.db, app.cache)
+	vendornetService := vendornet.NewService(app.db, app.cache)
 	homerescueService := homerescue.NewService(app.db, app.cache, app.logger)
 	lifeosService := lifeos.NewService(app.db, app.cache)
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
-	paymentConfig := &payment.Config{
-		PaystackSecretKey:    getEnv("PAYSTACK_SECRET_KEY", ""),
-		PaystackPublicKey:    getEnv("PAYSTACK_PUBLIC_KEY", ""),
-		FlutterwaveSecretKey: getEnv("FLUTTERWAVE_SECRET_KEY", ""),
-		FlutterwavePublicKey: getEnv("FLUTTERWAVE_PUBLIC_KEY", ""),
-		DefaultCurrency:      getEnv("DEFAULT_CURRENCY", "NGN"),
-		PlatformFeePercent:   5.0, // 5% platform fee
-		EscrowExpiryDays:     30,
-	}
-	paymentService := payment.NewService(app.db, app.cache, paymentConfig)
-
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	paymentHandler := payments.NewHandler(paymentService, app.logger)
 	vendorHandler := vendors.NewHandler(vendorService, serviceManager, app.logger)
+	vendornetHandler := vendornetAPI.NewHandler(vendornetService, app.logger)
 	homerescueHandler := homerescueAPI.NewHandler(homerescueService, app.logger)
 	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
-	paymentHandler := payments.NewHandler(paymentService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -347,15 +339,7 @@ func (app *App) setupRouter() {
 		}
 
 		// VendorNet - B2B Partnership Network
-		vendornet := v1.Group("/vendornet")
-		{
-			vendornet.GET("/partners/matches", app.getPartnerMatches)
-			vendornet.POST("/partnerships", app.createPartnership)
-			vendornet.GET("/partnerships/:id", app.getPartnership)
-			vendornet.POST("/referrals", app.createReferral)
-			vendornet.PUT("/referrals/:id/status", app.updateReferralStatus)
-			vendornet.GET("/analytics", app.getNetworkAnalytics)
-		}
+		vendornetHandler.RegisterRoutes(v1)
 
 		// HomeRescue - Emergency Services
 		homerescue := v1.Group("/homerescue")
@@ -803,12 +787,6 @@ func determineNextState(intent string, currentState string) string {
 	}
 }
 
-func (app *App) getPartnerMatches(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) createPartnership(c *gin.Context)     { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getPartnership(c *gin.Context)        { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) createReferral(c *gin.Context)        { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) updateReferralStatus(c *gin.Context)  { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
-func (app *App) getNetworkAnalytics(c *gin.Context)   { c.JSON(http.StatusNotImplemented, gin.H{"error": "not implemented"}) }
 
 // HomeRescue handlers are now implemented in api/homerescue/handlers.go
 
