@@ -71,6 +71,24 @@ PHASE 2: DOMAIN ARCHITECTURE (The "How")
    - API: RESTful with OpenAPI 3.0 spec OR GraphQL with SDL
    - Database: PostgreSQL with migration scripts (Flyway/Alembic pattern)
 
+   DEPLOYMENT READINESS (MANDATORY):
+   - Dockerfile: Optimized multi-stage build (Python/FastAPI or Node.js/TypeScript)
+     * Production-ready with non-root user
+     * Health check endpoint configured
+     * Environment variable configuration
+   - docker-compose.yml: Complete stack including:
+     * Application service (your product)
+     * PostgreSQL database (persistent volumes)
+     * Hasura GraphQL Engine (connected to same Postgres)
+       - Admin secret configured via environment variable
+       - Automatic schema discovery
+       - CORS configured for development
+   - Health Check Endpoint: /health endpoint returning JSON with:
+     * status: "healthy" | "unhealthy"
+     * timestamp: ISO 8601 timestamp
+     * version: application version
+     * database: connection status
+
 PHASE 3: COMPLIANCE ENFORCEMENT (The "Rules")
 ────────────────────────────────────────────────────────────────────────────────
    MANDATORY COMPLIANCE MODULES (No Shortcuts):
@@ -186,11 +204,16 @@ Return a JSON object containing:
     {"path": "README.md", "content": "..."},
     {"path": "ARCHITECTURE.md", "content": "..."},
     {"path": "COMPLIANCE.md", "content": "..."},
-    {"path": "docker-compose.yml", "content": "..."},
+    {"path": "DEVELOPER_GUIDE.md", "content": "..."},
+    {"path": "Dockerfile", "content": "... (MANDATORY - Multi-stage optimized build)"},
+    {"path": "docker-compose.yml", "content": "... (MANDATORY - App + Postgres + Hasura)"},
+    {"path": ".dockerignore", "content": "... (Exclude node_modules, .git, etc.)"},
+    {"path": ".env.example", "content": "... (Template for environment variables)"},
     {"path": "src/domain/entities/[Entity].ts", "content": "..."},
     {"path": "src/domain/repositories/[Repository].ts", "content": "..."},
     {"path": "src/application/use-cases/[UseCase].ts", "content": "..."},
     {"path": "src/infrastructure/api/[Controller].ts", "content": "..."},
+    {"path": "src/infrastructure/api/health.ts", "content": "... (MANDATORY - Health check endpoint)"},
     {"path": "src/infrastructure/persistence/[RepositoryImpl].ts", "content": "..."},
     {"path": "tests/unit/domain/[Entity].test.ts", "content": "..."},
     {"path": "tests/integration/api/[Endpoint].test.ts", "content": "..."}
@@ -206,8 +229,11 @@ Before returning output, verify:
 ☐ NDPR data subject rights endpoints are implemented
 ☐ SOC2 structured logging is present in all write operations
 ☐ All secrets use environment variables (no hardcoded credentials)
-☐ Docker health checks are configured
-☐ README has quick start instructions
+☐ Dockerfile exists with multi-stage build and health checks
+☐ docker-compose.yml includes App + Postgres + Hasura (all connected)
+☐ /health endpoint is implemented and returns proper JSON
+☐ .env.example documents all required environment variables
+☐ README has quick start instructions (docker-compose up)
 ☐ COMPLIANCE.md documents all regulatory controls
 
 ═══════════════════════════════════════════════════════════════════════════════
