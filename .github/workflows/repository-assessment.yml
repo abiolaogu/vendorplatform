@@ -3,12 +3,14 @@ name: Repository Assessment & Improvement
 on:
   # 1. The Autonomous Schedule (Every 6 Hours)
   schedule:
+    # UTC Times: 00:00, 06:00, 12:00, 18:00
+    # Note: GitHub Actions runs in UTC.
     - cron: '0 0,6,12,18 * * *'
     
   # 2. Manual Trigger
   workflow_dispatch:
   
-  # 3. On Code Change
+  # 3. On Code Change (Optional - keep if you want instant feedback)
   push:
     branches:
       - main
@@ -42,7 +44,7 @@ jobs:
           python scripts/agents/repo_assessor.py
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.FACTORY_ADMIN_TOKEN }}
         continue-on-error: true
 
       - name: Run Repository Improvement
@@ -50,7 +52,6 @@ jobs:
           python scripts/agents/repo_improver.py
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Admin token allows issues to trigger the Claude worker
           GITHUB_TOKEN: ${{ secrets.FACTORY_ADMIN_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
 
@@ -69,7 +70,7 @@ jobs:
         with:
           payload: |
             {
-              "text": "🏭 *Factory Audit: ${{ github.repository }}*\n*Status:* ${{ job.status }}\n*Trigger:* ${{ github.event_name }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Audit Logs>"
+              "text": "🏭 *Factory Update: Adtech Repository*\n*Status:* ${{ job.status }}\n*Details:* Assessment and Improvement run completed.\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Workflow Logs>"
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
