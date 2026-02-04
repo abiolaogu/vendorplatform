@@ -257,7 +257,7 @@ func (app *App) setupRouter() {
 		FlutterwaveSecretKey: getEnv("FLUTTERWAVE_SECRET_KEY", ""),
 		FlutterwavePublicKey: getEnv("FLUTTERWAVE_PUBLIC_KEY", ""),
 		WebhookSecret:        getEnv("WEBHOOK_SECRET", ""),
-		DefaultCurrency:      "NGN",
+		DefaultCurrency:      getEnv("DEFAULT_CURRENCY", "NGN"),
 		PlatformFeePercent:   10.0, // 10% platform fee
 		EscrowExpiryDays:     30,   // 30 days escrow expiry
 	}
@@ -270,17 +270,6 @@ func (app *App) setupRouter() {
 	bookingService := booking.NewService(app.db, app.cache)
 	reviewService := review.NewService(app.db, app.cache)
 
-	paymentConfig := &payment.Config{
-		PaystackSecretKey:    getEnv("PAYSTACK_SECRET_KEY", ""),
-		PaystackPublicKey:    getEnv("PAYSTACK_PUBLIC_KEY", ""),
-		FlutterwaveSecretKey: getEnv("FLUTTERWAVE_SECRET_KEY", ""),
-		FlutterwavePublicKey: getEnv("FLUTTERWAVE_PUBLIC_KEY", ""),
-		DefaultCurrency:      getEnv("DEFAULT_CURRENCY", "NGN"),
-		PlatformFeePercent:   5.0, // 5% platform fee
-		EscrowExpiryDays:     30,
-	}
-	paymentService := payment.NewService(app.db, app.cache, paymentConfig)
-
 	// Initialize handlers
 	authHandler := apiauth.NewHandler(authService, app.logger)
 	paymentHandler := payments.NewHandler(paymentService, app.logger)
@@ -289,7 +278,6 @@ func (app *App) setupRouter() {
 	lifeosHandler := lifeosAPI.NewHandler(lifeosService, app.logger)
 	bookingHandler := bookings.NewHandler(bookingService, app.logger)
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
-	paymentHandler := payments.NewHandler(paymentService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -297,63 +285,56 @@ func (app *App) setupRouter() {
 		// Authentication (public)
 		authHandler.RegisterRoutes(v1)
 
-		// Payment Processing
-		paymentHandler.RegisterRoutes(v1)
-
-		// Vendor Management
-		vendorHandler.RegisterRoutes(v1)
-
-		// HomeRescue - Emergency Services
-		homerescueHandler.RegisterRoutes(v1)
-		// Booking Management
-		bookingHandler.RegisterRoutes(v1)
-
-		// Review & Rating System
-		reviewHandler.RegisterRoutes(v1)
-
-		// Payment Processing & Escrow
-		paymentHandler.RegisterRoutes(v1)
-
-		// LifeOS - Life Event Orchestration
-		lifeosHandler.RegisterRoutes(v1)
-
-		// EventGPT - Conversational AI Planner
-		eventgpt := v1.Group("/eventgpt")
+		// Protected routes - require authentication
+		protected := v1.Group("")
+		protected.Use(authService.AuthMiddleware())
 		{
-			eventgpt.POST("/conversations", app.startConversation)
-			eventgpt.POST("/conversations/:id/messages", app.sendMessage)
-			eventgpt.GET("/conversations/:id", app.getConversation)
-			eventgpt.DELETE("/conversations/:id", app.endConversation)
+			// Booking Management
+			bookingHandler.RegisterRoutes(protected)
+
+			// Review & Rating System
+			reviewHandler.RegisterRoutes(protected)
+
+			// Payment Processing & Escrow
+			paymentHandler.RegisterRoutes(protected)
+
+			// Vendor Management (some endpoints protected)
+			vendorHandler.RegisterRoutes(protected)
+
+			// LifeOS - Life Event Orchestration
+			lifeosHandler.RegisterRoutes(protected)
+
+			// HomeRescue - Emergency Services
+			homerescueHandler.RegisterRoutes(protected)
 		}
 
-		// VendorNet - B2B Partnership Network
-		vendornet := v1.Group("/vendornet")
-		{
-			vendornet.GET("/partners/matches", app.getPartnerMatches)
-			vendornet.POST("/partnerships", app.createPartnership)
-			vendornet.GET("/partnerships/:id", app.getPartnership)
-			vendornet.POST("/referrals", app.createReferral)
-			vendornet.PUT("/referrals/:id/status", app.updateReferralStatus)
-			vendornet.GET("/analytics", app.getNetworkAnalytics)
-		}
+			// EventGPT - Conversational AI Planner
+			eventgpt := protected.Group("/eventgpt")
+			{
+				eventgpt.POST("/conversations", app.startConversation)
+				eventgpt.POST("/conversations/:id/messages", app.sendMessage)
+				eventgpt.GET("/conversations/:id", app.getConversation)
+				eventgpt.DELETE("/conversations/:id", app.endConversation)
+			}
 
-		// HomeRescue - Emergency Services
-		homerescue := v1.Group("/homerescue")
-		{
-			homerescue.POST("/emergencies", homerescueHandler.CreateEmergency)
-			homerescue.GET("/emergencies/:id", homerescueHandler.GetEmergencyStatus)
-			homerescue.GET("/emergencies/:id/tracking", homerescueHandler.GetEmergencyTracking)
-			homerescue.POST("/technicians/location", homerescueHandler.UpdateTechLocation)
-			homerescue.PUT("/emergencies/:id/accept", homerescueHandler.AcceptEmergency)
-			homerescue.PUT("/emergencies/:id/complete", homerescueHandler.CompleteEmergency)
-		}
+			// VendorNet - B2B Partnership Network
+			vendornet := protected.Group("/vendornet")
+			{
+				vendornet.GET("/partners/matches", app.getPartnerMatches)
+				vendornet.POST("/partnerships", app.createPartnership)
+				vendornet.GET("/partnerships/:id", app.getPartnership)
+				vendornet.POST("/referrals", app.createReferral)
+				vendornet.PUT("/referrals/:id/status", app.updateReferralStatus)
+				vendornet.GET("/analytics", app.getNetworkAnalytics)
+			}
 
-		// Recommendations
-		recommendations := v1.Group("/recommendations")
-		{
-			recommendations.GET("/services", app.getServiceRecommendations)
-			recommendations.GET("/vendors", app.getVendorRecommendations)
-			recommendations.GET("/bundles", app.getBundleRecommendations)
+			// Recommendations
+			recommendations := protected.Group("/recommendations")
+			{
+				recommendations.GET("/services", app.getServiceRecommendations)
+				recommendations.GET("/vendors", app.getVendorRecommendations)
+				recommendations.GET("/bundles", app.getBundleRecommendations)
+			}
 		}
 	}
 
@@ -439,16 +420,10 @@ func (app *App) readinessCheck(c *gin.Context) {
 
 // startConversation initializes a new EventGPT conversation session
 func (app *App) startConversation(c *gin.Context) {
-	// Get user ID from context (would be set by auth middleware)
-	userIDStr := c.GetString("user_id")
-	if userIDStr == "" {
-		// For testing, allow anonymous conversations
-		userIDStr = uuid.New().String()
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+	// Get user ID from authenticated context
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
 		return
 	}
 
@@ -469,8 +444,8 @@ func (app *App) startConversation(c *gin.Context) {
 	emptyJSON := []byte("{}")
 	emptyArray := []byte("[]")
 
-	_, err = app.db.Exec(c.Request.Context(), query,
-		conversationID, userID, "general_inquiry", "welcome",
+	_, err := app.db.Exec(c.Request.Context(), query,
+		conversationID, userID.(uuid.UUID), "general_inquiry", "welcome",
 		emptyJSON, emptyJSON, emptyArray, 0,
 		emptyJSON, "en", channel, now, now,
 	)

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/review"
 )
 
@@ -56,15 +57,18 @@ func (h *Handler) CreateReview(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user_id from authenticated session
-	// For now, expect it in the request
-	if req.UserID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_request",
-			"message": "user_id is required",
+	// Get user_id from authenticated session
+	userID, err := auth.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "unauthorized",
+			"message": "Authentication required",
 		})
 		return
 	}
+
+	// Override the user_id from request with authenticated user_id
+	req.UserID = userID
 
 	r, err := h.reviewService.Create(c.Request.Context(), &req)
 	if err != nil {
@@ -297,9 +301,9 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user_id from authenticated session
-	userID := c.GetHeader("X-User-ID") // Placeholder
-	if userID == "" {
+	// Get user_id from authenticated session
+	userID, err := auth.GetUserFromContext(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "unauthorized",
 			"message": "Authentication required",
@@ -307,16 +311,7 @@ func (h *Handler) UpdateReview(c *gin.Context) {
 		return
 	}
 
-	userUUID, err := uuid.Parse(userID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_user",
-			"message": "Invalid user ID",
-		})
-		return
-	}
-
-	r, err := h.reviewService.Update(c.Request.Context(), id, userUUID, &req)
+	r, err := h.reviewService.Update(c.Request.Context(), id, userID, &req)
 	if err == review.ErrReviewNotFound {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "not_found",
@@ -361,9 +356,9 @@ func (h *Handler) DeleteReview(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user_id from authenticated session
-	userID := c.GetHeader("X-User-ID") // Placeholder
-	if userID == "" {
+	// Get user_id from authenticated session
+	userID, err := auth.GetUserFromContext(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "unauthorized",
 			"message": "Authentication required",
@@ -371,16 +366,7 @@ func (h *Handler) DeleteReview(c *gin.Context) {
 		return
 	}
 
-	userUUID, err := uuid.Parse(userID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_user",
-			"message": "Invalid user ID",
-		})
-		return
-	}
-
-	err = h.reviewService.Delete(c.Request.Context(), id, userUUID)
+	err = h.reviewService.Delete(c.Request.Context(), id, userID)
 	if err == review.ErrReviewNotFound {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "not_found",
@@ -436,9 +422,9 @@ func (h *Handler) AddVendorResponse(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get vendor user_id from authenticated session
-	vendorUserID := c.GetHeader("X-User-ID") // Placeholder
-	if vendorUserID == "" {
+	// Get vendor user_id from authenticated session
+	vendorUserID, err := auth.GetUserFromContext(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "unauthorized",
 			"message": "Authentication required",
@@ -446,16 +432,7 @@ func (h *Handler) AddVendorResponse(c *gin.Context) {
 		return
 	}
 
-	vendorUUID, err := uuid.Parse(vendorUserID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_user",
-			"message": "Invalid user ID",
-		})
-		return
-	}
-
-	err = h.reviewService.AddVendorResponse(c.Request.Context(), id, vendorUUID, req.Response)
+	err = h.reviewService.AddVendorResponse(c.Request.Context(), id, vendorUserID, req.Response)
 	if err == review.ErrReviewNotFound {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error":   "not_found",
@@ -511,9 +488,9 @@ func (h *Handler) VoteHelpful(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user_id from authenticated session
-	userID := c.GetHeader("X-User-ID") // Placeholder
-	if userID == "" {
+	// Get user_id from authenticated session
+	userID, err := auth.GetUserFromContext(c)
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"error":   "unauthorized",
 			"message": "Authentication required",
@@ -521,16 +498,7 @@ func (h *Handler) VoteHelpful(c *gin.Context) {
 		return
 	}
 
-	userUUID, err := uuid.Parse(userID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_user",
-			"message": "Invalid user ID",
-		})
-		return
-	}
-
-	err = h.reviewService.VoteHelpful(c.Request.Context(), id, userUUID, req.IsHelpful)
+	err = h.reviewService.VoteHelpful(c.Request.Context(), id, userID, req.IsHelpful)
 	if err != nil {
 		h.logger.Error("Failed to record vote", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{

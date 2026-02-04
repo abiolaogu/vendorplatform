@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 )
@@ -56,15 +57,18 @@ func (h *Handler) CreateVendor(c *gin.Context) {
 		return
 	}
 
-	// TODO: Get user_id from authenticated session
-	// For now, expect it in the request
-	if req.UserID == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "invalid_request",
-			"message": "user_id is required",
+	// Get user_id from authenticated session
+	userID, err := auth.GetUserFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "unauthorized",
+			"message": "Authentication required",
 		})
 		return
 	}
+
+	// Override the user_id from request with authenticated user_id
+	req.UserID = userID
 
 	v, err := h.vendorService.Create(c.Request.Context(), &req)
 	if err != nil {

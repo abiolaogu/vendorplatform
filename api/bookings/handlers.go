@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 )
 
@@ -97,24 +98,10 @@ func (h *Handler) CreateBooking(c *gin.Context) {
 		return
 	}
 
-	// Get user ID from context (would normally come from auth middleware)
-	// TODO: Implement proper authentication middleware
-	userID := c.GetString("user_id")
-	if userID == "" {
-		// For now, use a header or query param
-		userID = c.GetHeader("X-User-ID")
-		if userID == "" {
-			userID = c.Query("user_id")
-		}
-		if userID == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "user_id is required"})
-			return
-		}
-	}
-
-	userUUID, err := uuid.Parse(userID)
+	// Get user ID from authenticated session
+	userUUID, err := auth.GetUserFromContext(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
 		return
 	}
 
