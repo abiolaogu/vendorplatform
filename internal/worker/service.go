@@ -607,10 +607,20 @@ func (s *Service) RetryFailedJob(ctx context.Context, jobID uuid.UUID) error {
 		UPDATE jobs SET status = 'pending', attempts = 0, scheduled_at = NOW()
 		WHERE id = $1 AND status = 'failed'
 	`, jobID)
-	
+
 	if err == nil {
 		s.cache.LPush(ctx, "jobs:queue", jobID.String())
 	}
-	
+
 	return err
+}
+
+// QueryRow exposes database QueryRow for handler use
+func (s *Service) QueryRow(ctx context.Context, query string, args ...interface{}) pgxRow {
+	return s.db.QueryRow(ctx, query, args...)
+}
+
+// pgxRow interface for database row scanning
+type pgxRow interface {
+	Scan(dest ...interface{}) error
 }

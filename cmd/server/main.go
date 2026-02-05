@@ -30,6 +30,7 @@ import (
 	vendornetAPI "github.com/BillyRonksGlobal/vendorplatform/api/vendornet"
 	homerescueAPI "github.com/BillyRonksGlobal/vendorplatform/api/homerescue"
 	lifeosAPI "github.com/BillyRonksGlobal/vendorplatform/api/lifeos"
+	workerAPI "github.com/BillyRonksGlobal/vendorplatform/api/worker"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/auth"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/booking"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/eventgpt"
@@ -42,6 +43,7 @@ import (
 	"github.com/BillyRonksGlobal/vendorplatform/internal/service"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendor"
 	"github.com/BillyRonksGlobal/vendorplatform/internal/vendornet"
+	"github.com/BillyRonksGlobal/vendorplatform/internal/worker"
 	"github.com/BillyRonksGlobal/vendorplatform/recommendation-engine"
 )
 
@@ -56,12 +58,13 @@ type Config struct {
 
 // App holds the application dependencies
 type App struct {
-	config            *Config
-	db                *pgxpool.Pool
-	cache             *redis.Client
-	logger            *zap.Logger
-	router            *gin.Engine
+	config               *Config
+	db                   *pgxpool.Pool
+	cache                *redis.Client
+	logger               *zap.Logger
+	router               *gin.Engine
 	recommendationEngine *recommendation.Engine
+	workerService        *worker.Service
 }
 
 func main() {
@@ -92,6 +95,9 @@ func main() {
 		logger.Fatal("Failed to initialize recommendation engine", zap.Error(err))
 	}
 
+	// Initialize worker service
+	workerService := initWorkerService(db, cache, logger)
+
 	// Create application
 	app := &App{
 		config:               config,
@@ -99,6 +105,7 @@ func main() {
 		cache:                cache,
 		logger:               logger,
 		recommendationEngine: recEngine,
+		workerService:        workerService,
 	}
 
 	// Setup router
@@ -127,6 +134,9 @@ func main() {
 	<-quit
 
 	logger.Info("Shutting down server...")
+
+	// Stop worker service first
+	app.workerService.Stop()
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -233,6 +243,44 @@ func initRecommendationEngine(db *pgxpool.Pool, cache *redis.Client, logger *zap
 	return engine, nil
 }
 
+func initWorkerService(db *pgxpool.Pool, cache *redis.Client, logger *zap.Logger) *worker.Service {
+	logger.Info("Initializing worker service...")
+
+	// Parse worker configuration from environment
+	numWorkers, _ := strconv.Atoi(getEnv("WORKER_NUM_WORKERS", "5"))
+	maxRetries, _ := strconv.Atoi(getEnv("WORKER_MAX_RETRIES", "3"))
+
+	config := &worker.Config{
+		NumWorkers:      numWorkers,
+		MaxRetries:      maxRetries,
+		RetryBackoff:    time.Minute,
+		PollInterval:    time.Second,
+		JobTimeout:      5 * time.Minute,
+		ShutdownTimeout: 30 * time.Second,
+	}
+
+	service := worker.NewService(db, cache, config)
+
+	// Register default handlers
+	service.RegisterDefaultHandlers()
+
+	// Register default cron jobs
+	service.RegisterDefaultCronJobs()
+
+	// Start worker service
+	ctx := context.Background()
+	if err := service.Start(ctx); err != nil {
+		logger.Fatal("Failed to start worker service", zap.Error(err))
+	}
+
+	logger.Info("Worker service initialized successfully",
+		zap.Int("num_workers", numWorkers),
+		zap.Int("max_retries", maxRetries),
+	)
+
+	return service
+}
+
 func (app *App) setupRouter() {
 	if app.config.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -328,6 +376,7 @@ func (app *App) setupRouter() {
 	reviewHandler := reviews.NewHandler(reviewService, app.logger)
 	eventgptHandler := eventgptAPI.NewHandler(eventgptService, app.logger)
 	searchHandler := searchAPI.NewHandler(searchService, app.logger)
+	workerHandler := workerAPI.NewHandler(app.workerService, app.logger)
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")
@@ -363,6 +412,9 @@ func (app *App) setupRouter() {
 
 		// Search - Full-text search with Elasticsearch
 		searchHandler.RegisterRoutes(v1)
+
+		// Worker - Background job processing
+		workerHandler.RegisterRoutes(v1)
 
 		// HomeRescue - Emergency Services
 		homerescue := v1.Group("/homerescue")
